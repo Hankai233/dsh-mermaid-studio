@@ -1,0 +1,21 @@
+# Install / build output that must not be committed
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+
+# Local editor / OS noise
+.DS_Store
+Thumbs.db
+*.bak
+*.bak-*
+*.orig
+*.rej
+
+# QA artifacts: results are per-machine evidence, fixtures are generated
+qa/results/
+qa/fixtures/20-diagrams.md
+qa/fixtures/oversize.md
+qa/fixtures/same-source.md
+
+# Diagnostic dumps
+mms-audit-*.json

@@ -1,0 +1,7 @@
+# 结果归档不入库（每次跑都会变，只作为本机证据）
+results/
+
+# 生成出来的大体量 fixture 不入库（用 gen-large.mjs 现场生成）
+fixtures/20-diagrams.md
+fixtures/oversize.md
+fixtures/same-source.md

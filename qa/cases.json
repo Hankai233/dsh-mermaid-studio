@@ -1,0 +1,367 @@
+{
+  "version": 1,
+  "spec": "docs/superpowers/specs/2026-11-09-dsh-mermaid-studio-design.md",
+  "sections": [
+    "§15",
+    "§15.1"
+  ],
+  "note": "用法例 id 的单一事实源。requiredAssertions 是「这条用例至少要说清这些断言」的机器判据：acceptance.mjs --check 会逐条比对名称，缺一条就判归档不合法（P0-12 的闭合方式）。manual=true 表示必须人工操作（视觉/交互），不能由脚本判定。 2026-11-09：按用户要求移除 PNG/JPG 导出与复制源码，用例 #7 一并删除。 2026-11-09：主题改为始终跟随宿主，三态开关与 themeMode 配置删除，用例 #8 / #23 一并删除。",
+  "cases": [
+    {
+      "id": "1",
+      "group": "perf",
+      "p0": true,
+      "manual": false,
+      "name": "首次出现 mermaid 围栏（20 张图长消息）",
+      "requiredAssertions": [
+        "mermaid 围栏成图",
+        "python 围栏不误判",
+        "python 围栏无卡片",
+        "空围栏无卡片",
+        "无语言标签 + 关键字命中",
+        "通用标签（代码块）+ mermaid 首行 → 成图",
+        "通用标签 + 非 mermaid 首行 → 不成图",
+        "卡片紧邻代码块（不移动 React 节点）",
+        "工具栏无主题切换（只跟随宿主）",
+        "工具栏无复制按钮",
+        "渲染计数 >= 3",
+        "同源 5 个围栏 → 5 张卡",
+        "滚动后 9 张卡全部成图"
+      ]
+    },
+    {
+      "id": "2",
+      "group": "perf",
+      "p0": true,
+      "manual": false,
+      "name": "刷新页面（L2 命中，P95 ≤ 150 ms）",
+      "requiredAssertions": [
+        "IndexedDB 有记录",
+        "刷新后命中 L2",
+        "刷新后 renderCount 不增",
+        "免渲染注入耗时 < 500ms"
+      ]
+    },
+    {
+      "id": "2b",
+      "group": "perf",
+      "p0": true,
+      "manual": false,
+      "name": "刷新页面（冷缓存 / 首见）",
+      "requiredAssertions": [
+        "冷缓存下有真实渲染",
+        "冷缓存下无持久命中",
+        "渲染期间长任务 ≤ 2 次"
+      ]
+    },
+    {
+      "id": "3",
+      "group": "cache",
+      "p0": true,
+      "manual": false,
+      "name": "切换会话再切回（L1 命中）",
+      "requiredAssertions": [
+        "重挂载不重新渲染",
+        "L1 命中计数增长"
+      ]
+    },
+    {
+      "id": "4",
+      "group": "interact",
+      "p0": true,
+      "manual": true,
+      "name": "滚轮 / 拖拽 / 双击 / 0 宽容器",
+      "requiredAssertions": [
+        "初始为适应宽度（transform 有效）",
+        "普通滚轮不拦截页面滚动",
+        "Ctrl+滚轮缩放生效",
+        "缩放结果无 NaN",
+        "指针锚定偏移 ≤2px（内容坐标）",
+        "用户缩放下限 0.1 / 上限 8",
+        "缩到下限仍 ≥0.1",
+        "拖拽平移 1:1（x+40）",
+        "双击切到 100%（s≈1）",
+        "0 尺寸容器不产生 NaN"
+      ]
+    },
+    {
+      "id": "5",
+      "group": "interact",
+      "p0": true,
+      "manual": true,
+      "name": "全屏 Esc / 焦点回拉 ≤200 ms",
+      "requiredAssertions": [
+        "overlay 打开",
+        "body 滚动被锁",
+        "aria-modal 宣告",
+        "焦点回拉到 overlay 内",
+        "Esc 关闭 overlay",
+        "body overflow 还原为进入前",
+        "焦点回到触发按钮"
+      ]
+    },
+    {
+      "id": "6",
+      "group": "export",
+      "p0": true,
+      "manual": false,
+      "name": "导出 SVG（结构断言）",
+      "requiredAssertions": [
+        "XML 解析无 parsererror",
+        "含 xmlns",
+        "含 viewBox",
+        "含显式 width/height",
+        "含 fallback 字体栈",
+        "导出物无 <script>",
+        "导出物无外连 url()",
+        "导出器不再提供位图接口"
+      ]
+    },
+    {
+      "id": "8",
+      "group": "theme",
+      "p0": true,
+      "manual": false,
+      "name": "主题跟随宿主（切暗后重渲染，切回命中缓存）",
+      "requiredAssertions": [
+        "工具栏没有主题开关",
+        "跟随宿主切到暗色后重新渲染",
+        "暗色下卡片仍 ready",
+        "切回亮色时命中已缓存的那份",
+        "两份主题各自入库"
+      ]
+    },
+    {
+      "id": "9",
+      "group": "error",
+      "p0": true,
+      "manual": false,
+      "name": "语法错误围栏 + 重试绕过负缓存",
+      "requiredAssertions": [
+        "语法错误进入 error 态",
+        "错误卡提供重试",
+        "错误不写入持久缓存",
+        "手动重试绕过负缓存"
+      ]
+    },
+    {
+      "id": "10",
+      "group": "lifecycle",
+      "p0": true,
+      "manual": false,
+      "name": "卸载插件（现场清理）",
+      "requiredAssertions": [
+        "卸载前存在卡片",
+        "卸载前存在样式表",
+        "卡片全部移除",
+        "<style> 已移除",
+        "代码块全部可见",
+        "IndexedDB 库已删除",
+        "mms:* localStorage 已清空",
+        "__mmsStats 已移除",
+        "body overflow 已还原"
+      ]
+    },
+    {
+      "id": "11",
+      "group": "coexist",
+      "p0": false,
+      "manual": true,
+      "name": "与旧插件并存（现象复现，非交付项）",
+      "requiredAssertions": []
+    },
+    {
+      "id": "12",
+      "group": "security",
+      "p0": true,
+      "manual": false,
+      "name": "渲染态注入（6 条 payload 组）",
+      "requiredAssertions": [
+        "未执行注入脚本",
+        "body 可见性未被改变",
+        "无新增 body/html 全局样式规则",
+        "sanitizeRejected 有增量或 init 键被剥离",
+        "样式表数量未因注入增长"
+      ]
+    },
+    {
+      "id": "13",
+      "group": "security",
+      "p0": true,
+      "manual": false,
+      "name": "缓存命中态注入（播种契约）",
+      "requiredAssertions": [
+        "污染内容未进入 DOM",
+        "body 仍然可见",
+        "未执行注入脚本",
+        "sanitizeRejected 计数增加",
+        "自愈后卡片成图",
+        "该 key 未被回写为污染内容"
+      ]
+    },
+    {
+      "id": "14",
+      "group": "security",
+      "p0": true,
+      "manual": false,
+      "name": "过滤未过度收紧（防误杀）",
+      "requiredAssertions": [
+        "htmlLabels 图正常成图",
+        "foreignObject 被保留",
+        "合法 <style> 被保留",
+        "多行标签图（<br/>）正常成图",
+        "多行标签图未被误判为被阻止内容",
+        "宽松解析计数 ≥ 1",
+        "严格解析失败计数为 0（走的是宽松回退）"
+      ]
+    },
+    {
+      "id": "15",
+      "group": "security",
+      "p0": true,
+      "manual": false,
+      "name": "执行面收口（导出物顶层打开）",
+      "requiredAssertions": [
+        "payload 围栏成图",
+        "导出串含 xmlns",
+        "导出物无 script 元素",
+        "导出物无 on* 属性",
+        "导出物无外连 URL",
+        "顶层打开不执行脚本"
+      ]
+    },
+    {
+      "id": "16",
+      "group": "security",
+      "p0": true,
+      "manual": false,
+      "name": "数据可删除（IDB / mms:* / TTL）",
+      "requiredAssertions": [
+        "31 天前条目启动时被清",
+        "卸载后 IDB 库不存在",
+        "卸载后 mms:* 键为 0"
+      ]
+    },
+    {
+      "id": "17",
+      "group": "queue",
+      "p0": true,
+      "manual": false,
+      "name": "串行不变量（5 s 延迟打桩）",
+      "requiredAssertions": [
+        "流式 12 次改写后渲染 ≤ 3 次",
+        "卡片数 = 1（无重复卡片）",
+        "body 下无 mermaid 临时容器残留",
+        "代码块被整体替换 3 次后只留 1 张卡"
+      ]
+    },
+    {
+      "id": "18",
+      "group": "rollback",
+      "p0": true,
+      "manual": true,
+      "name": "回滚演练 ≤60 s",
+      "requiredAssertions": []
+    },
+    {
+      "id": "19",
+      "group": "cache",
+      "p0": true,
+      "manual": false,
+      "name": "cacheEnabled = false 语义",
+      "requiredAssertions": [
+        "cacheEnabled=false → store 记录数 0",
+        "每次进视口都重新渲染"
+      ]
+    },
+    {
+      "id": "20",
+      "group": "cache",
+      "p0": true,
+      "manual": false,
+      "name": "IndexedDB 降级 / 配额超限",
+      "requiredAssertions": [
+        "IDB 不可用仍成图",
+        "降级只告警一次",
+        "功能不中断（L1 仍生效）"
+      ]
+    },
+    {
+      "id": "21",
+      "group": "queue",
+      "p0": true,
+      "manual": false,
+      "name": "超时与槽位（永不 settle 打桩）",
+      "requiredAssertions": [
+        "第 1 项在跑时第 2 项不开始",
+        "永不 settle 后隔离并放行下一项",
+        "隔离时重建渲染器",
+        "超时事件已上报",
+        "连续 2 项超时后熔断",
+        "熔断后第 3 项不再开始",
+        "剩余项留在队列等待重置"
+      ]
+    },
+    {
+      "id": "22",
+      "group": "fence",
+      "p0": true,
+      "manual": false,
+      "name": "超长源码 + 治理键",
+      "requiredAssertions": [
+        "超长源码直接 error",
+        "超长源码错误文案",
+        "超长源码不显示重试",
+        "治理键被剥离后仍出图",
+        "卡片角标提示已忽略 init 指令",
+        "落库源码不含 securityLevel",
+        "dirRejected 记录被拒键"
+      ]
+    },
+    {
+      "id": "24",
+      "group": "a11y",
+      "p0": false,
+      "manual": true,
+      "name": "完整焦点陷阱（P1）",
+      "requiredAssertions": []
+    },
+    {
+      "id": "25",
+      "group": "scope",
+      "p0": true,
+      "manual": false,
+      "name": "作用域授权（非正文不渲染/不入库）",
+      "requiredAssertions": [
+        "侧栏围栏不生成卡片",
+        "会话流之外不生成卡片",
+        "非正文内容不入库"
+      ]
+    },
+    {
+      "id": "26",
+      "group": "scope",
+      "p0": true,
+      "manual": false,
+      "name": "可删除性（按会话 scopeHash）",
+      "requiredAssertions": [
+        "两份记录先落库",
+        "按 scope 删除返回删除数",
+        "会话 A 记录清 0",
+        "会话 B 记录仍在"
+      ]
+    },
+    {
+      "id": "27",
+      "group": "security",
+      "p0": true,
+      "manual": false,
+      "name": "过滤顺序（过滤先于插入）",
+      "requiredAssertions": [
+        "导入前已无 script 节点",
+        "导入前已无 on* 属性",
+        "payload 未执行"
+      ]
+    }
+  ]
+}

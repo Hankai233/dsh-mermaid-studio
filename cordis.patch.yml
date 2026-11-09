@@ -1,0 +1,7 @@
+# Bundle patch layer: mounts this package's main entry as the host half (a
+# plain Cordis plugin). The package.json `dsh.client` declaration makes the
+# web app load ./client as the browser half, which is where every feature
+# lives — the host half only carries config.
+- insert:
+    - id: dsh-mermaid-studio
+      name: dsh-mermaid-studio

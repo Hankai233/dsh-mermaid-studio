@@ -1,0 +1,6 @@
+# 探针插件的 bundle patch。
+# 形状照抄一个已在运行的 bundle（本机 dsh-mermaid-smooth@0.2.3 的 cordis.patch.yml 是单条 insert：id/name）。
+# 若宿主对 schema 有其它要求，先照抄旧插件的再改 id/name —— 这一步本身就是 UNK-04 要坐实的内容之一。
+- insert:
+    id: dsh-mermaid-probe
+    name: dsh-mermaid-probe

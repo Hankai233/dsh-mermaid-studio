@@ -1,0 +1,355 @@
+/* ── card.js — one card per fence: DOM, states, and the toolbar ─────────────
+ *
+ * Structure (the code block stays exactly where React put it, one sibling
+ * after the card; the plugin never writes an attribute, class or style onto a
+ * node it does not own):
+ *
+ *   <div class="mms-card" data-mms-state data-view data-mms-key>
+ *     <div class="mms-bar" role="toolbar">…</div>
+ *     <div class="mms-vp"><div class="mms-stage">…svg…</div>…skeleton/error…</div>
+ *     <div class="mms-status" aria-live="polite"></div>
+ *   </div>
+ *   <div class="md-code-block">…</div>
+ *
+ * Diagram/source is a `data-view` attribute on the card plus two CSS sibling
+ * rules — no node is moved, so React's commit never removes a child from a
+ * parent it does not know about.
+ */
+(function (g) {
+  'use strict';
+  var MMS = g.__MMS__ || (g.__MMS__ = {});
+
+  var VIEW_LABEL = { diagram: '图', code: '源码' };
+
+  function el(tag, className, text) {
+    var node = g.document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function iconButton(label, title, action) {
+    var button = el('button', 'mms-btn mms-btn-icon', label);
+    button.type = 'button';
+    button.title = title;
+    button.setAttribute('aria-label', title);
+    button.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      action(event);
+    });
+    return button;
+  }
+
+  function textButton(label, title, action) {
+    var button = el('button', 'mms-btn', label);
+    button.type = 'button';
+    button.title = title || label;
+    button.setAttribute('aria-label', title || label);
+    button.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      action(event);
+    });
+    return button;
+  }
+
+  function createCard(app, fence) {
+    var config = app.config;
+    var stats = app.stats;
+    var key = fence.key;
+    var state = {
+      view: readView(key),
+      phase: 'pending',
+      svgString: null,
+      renderId: null,
+      sanitized: null,
+      error: null,
+      retryable: true,
+      rejectedDirectives: !!fence.rejected
+    };
+
+    var root = el('div', 'mms-card');
+    root.setAttribute('data-mms-key', key.slice(0, 16));
+    root.setAttribute('data-mms-state', 'pending');
+    root.setAttribute('data-view', state.view);
+    root.setAttribute('role', 'img');
+    root.setAttribute('aria-label', 'Mermaid 图');
+
+    var bar = el('div', 'mms-bar');
+    bar.setAttribute('role', 'toolbar');
+    bar.setAttribute('aria-label', '图表工具');
+    var badge = el('span', 'mms-badge', 'mermaid');
+    var note = el('span', 'mms-note');
+    note.hidden = !state.rejectedDirectives;
+    if (state.rejectedDirectives) note.textContent = '已忽略 init 指令';
+    bar.appendChild(badge);
+    bar.appendChild(note);
+
+    var actions = el('div', 'mms-actions');
+    var viewButton = textButton(VIEW_LABEL.code, '查看源码', function () {
+      setView(state.view === 'diagram' ? 'code' : 'diagram');
+    });
+    // Export is SVG only: the raster path needed a second htmlLabels:false
+    // render plus a 27.8 Mpx canvas encode, which is what made the whole app
+    // stutter. Copy-source was dropped at the same time — the code view already
+    // shows the source and the host renders a copy button for every code block.
+    var exportButton = textButton('导出 SVG', '导出为 SVG 文件', function () {
+      doExportSvg();
+    });
+
+    var fullscreenButton = iconButton('⛶', '全屏查看', function () {
+      app.openViewer(card);
+    });
+
+    actions.appendChild(viewButton);
+    actions.appendChild(exportButton);
+    actions.appendChild(fullscreenButton);
+    bar.appendChild(actions);
+
+    var viewport = el('div', 'mms-vp');
+    viewport.tabIndex = 0;
+    viewport.setAttribute('role', 'application');
+    viewport.setAttribute('aria-label', '图表画布：Ctrl 滚轮缩放，拖拽平移，双击适应');
+    var stage = el('div', 'mms-stage');
+    var skeleton = el('div', 'mms-skeleton');
+    skeleton.appendChild(el('span'));
+    skeleton.appendChild(el('span'));
+    skeleton.appendChild(el('span'));
+
+    var errorBox = el('div', 'mms-error');
+    var errorHead = el('div', 'mms-error-head', '渲染失败');
+    var errorDetail = el('pre', 'mms-error-detail');
+    var errorActions = el('div', 'mms-error-actions');
+    var retryButton = textButton('重试', '重新渲染', function () {
+      app.retry(card);
+    });
+    var resetButton = textButton('重置渲染器', '重建 mermaid 实例并继续渲染', function () {
+      app.resetRenderer();
+      app.retry(card);
+    });
+    resetButton.hidden = true;
+    errorActions.appendChild(retryButton);
+    errorActions.appendChild(resetButton);
+    errorBox.appendChild(errorHead);
+    errorBox.appendChild(errorDetail);
+    errorBox.appendChild(errorActions);
+
+    viewport.appendChild(stage);
+    viewport.appendChild(skeleton);
+    viewport.appendChild(errorBox);
+
+    var status = el('div', 'mms-status');
+    status.setAttribute('aria-live', 'polite');
+
+    root.appendChild(bar);
+    root.appendChild(viewport);
+    root.appendChild(status);
+
+    var controller = MMS.createViewport({
+      viewport: viewport,
+      stage: stage,
+      onScale: function () {}
+    });
+
+    var statusTimer = null;
+    function flash(text) {
+      status.textContent = text;
+      status.setAttribute('data-on', '1');
+      if (statusTimer) clearTimeout(statusTimer);
+      statusTimer = setTimeout(function () {
+        status.removeAttribute('data-on');
+        status.textContent = '';
+      }, 2000);
+    }
+
+    function readView(cacheKey) {
+      var stored = MMS.readLs(MMS.CONFIG.LS_VIEW_PREFIX + cacheKey.slice(0, 12));
+      return stored === 'code' || stored === 'diagram' ? stored : config.DEFAULT_VIEW;
+    }
+
+    function setView(view) {
+      state.view = view === 'code' ? 'code' : 'diagram';
+      root.setAttribute('data-view', state.view);
+      viewButton.textContent = state.view === 'diagram' ? VIEW_LABEL.code : VIEW_LABEL.diagram;
+      viewButton.setAttribute('aria-pressed', state.view === 'code' ? 'true' : 'false');
+      MMS.writeLs(MMS.CONFIG.LS_VIEW_PREFIX + key.slice(0, 12), state.view);
+      if (state.view === 'diagram' && state.phase === 'ready') {
+        requestAnimationFrame(function () {
+          if (root.isConnected) controller.refit();
+        });
+      }
+      app.onViewChange(card, state.view);
+    }
+
+    function setPhase(phase) {
+      state.phase = phase;
+      root.setAttribute('data-mms-state', phase);
+    }
+
+    function setSkeletonSize(width, height) {
+      if (!width || !height) return;
+      skeleton.setAttribute('data-sized', '1');
+      var box = viewport.getBoundingClientRect();
+      if (!box.width) return;
+      var scale = Math.min(box.width / width, 1);
+      skeleton.style.height = Math.max(80, Math.round(height * scale)) + 'px';
+    }
+
+    function clearSkeletonSize() {
+      skeleton.removeAttribute('data-sized');
+      skeleton.style.height = '';
+      skeleton.style.width = '';
+    }
+
+    /** Give the injected SVG a definite layout size so fit/zoom maths is exact. */
+    function normalizeInjectedSize(svg) {
+      if (!svg) return;
+      var viewBox = svg.getAttribute('viewBox');
+      if (viewBox) {
+        var parts = viewBox.split(/[\s,]+/).map(Number);
+        if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+          svg.setAttribute('width', String(parts[2]));
+          svg.setAttribute('height', String(parts[3]));
+        }
+      }
+      // mermaid ships `max-width: …px` inline; our stage owns the sizing now.
+      svg.style.maxWidth = 'none';
+      svg.style.width = svg.getAttribute('width') || '';
+      svg.style.height = svg.getAttribute('height') || '';
+    }
+
+    function showSvg(svgString, renderId, meta) {
+      try {
+        var result = app.sanitizer.inject(stage, svgString, renderId);
+        state.svgString = svgString;
+        state.renderId = renderId;
+        state.sanitized = result;
+        state.error = null;
+        normalizeInjectedSize(result.svg);
+        clearSkeletonSize();
+        setPhase('ready');
+        root.setAttribute('aria-label', (meta && meta.title) || 'Mermaid 图');
+        viewButton.hidden = false;
+        // One fit, in the frame after insertion: a second fit forced another
+        // full layout of a 3693 px SVG (measured: a 191 ms long task on first
+        // render), and fitWidth() already centres what it needs to.
+        requestAnimationFrame(function () {
+          controller.fitWidth();
+        });
+        if (meta && meta.clamped) flash('图过大，已按比例缩放');
+        return true;
+      } catch (error) {
+        if (error && error.name === 'SanitizeError') {
+          if (error.kind === 'parse') {
+            // Not a security event: the markup itself did not parse. Saying
+            // "blocked content" here would point the user at the wrong problem.
+            stats.sanitizeParseFail += 1;
+            showError('图表标记无法解析', true, error.message);
+            stats.publish();
+            return false;
+          }
+          stats.sanitizeRejected += 1;
+          showError('渲染结果包含被阻止的内容', false, error.message);
+          stats.publish();
+          // Self-heal: the fence itself is fine, only the stored copy was
+          // tampered with, so the caller re-renders and overwrites the record.
+          // The badge makes the event visible instead of silently recovering.
+          flash('已阻止缓存中的可疑内容，正在重新渲染');
+          return false;
+        }
+        showError('图表注入失败', true, error && error.message);
+        return false;
+      }
+    }
+
+    function showError(message, retryable, detail) {
+      state.error = { message: message, detail: detail || '' };
+      state.retryable = retryable !== false;
+      errorHead.textContent = message;
+      errorDetail.textContent = detail || '';
+      retryButton.hidden = !state.retryable;
+      resetButton.hidden = !app.isBreakerOpen();
+      setPhase('error');
+      clearSkeletonSize();
+      if (stats) stats.error(message);
+      stats.publish();
+    }
+
+    function showOverLong() {
+      state.retryable = false;
+      showError('源码过长，已跳过渲染', false, '超过 ' + MMS.CONFIG.MAX_SOURCE_CHARS + ' 字符的围栏不进入渲染队列');
+    }
+
+    function doExportSvg() {
+      if (state.phase !== 'ready' || !stage.firstElementChild) {
+        flash('图表尚未渲染完成');
+        return;
+      }
+      try {
+        app.exporter.exportVector(stage.firstElementChild, key);
+        flash('已导出 SVG');
+      } catch (error) {
+        flash('导出失败：' + ((error && error.message) || '未知错误'));
+      }
+    }
+
+    var disposed = false;
+    var card = {
+      el: root,
+      key: key,
+      source: fence.source,
+      state: state,
+      mount: function (block) {
+        if (block && block.parentNode) block.parentNode.insertBefore(root, block);
+      },
+      setSkeletonSize: setSkeletonSize,
+      showSvg: showSvg,
+      showError: showError,
+      showOverLong: showOverLong,
+      showPending: function () {
+        setPhase('pending');
+      },
+      flash: flash,
+      setBreakerVisible: function (visible) {
+        resetButton.hidden = !visible;
+      },
+      getSvg: function () {
+        return state.phase === 'ready' ? stage.firstElementChild : null;
+      },
+      /** Already-sanitized serialization of the injected tree (§8.1). */
+      serialize: function () {
+        var svg = stage.firstElementChild;
+        return svg ? app.exporter.serializeSvg(svg) : null;
+      },
+      getHash: function () {
+        return key;
+      },
+      getSource: function () {
+        return fence.source;
+      },
+      dispose: function () {
+        if (disposed) return;
+        disposed = true;
+        if (statusTimer) clearTimeout(statusTimer);
+        controller.dispose();
+        if (root.parentNode) root.parentNode.removeChild(root);
+        stage.replaceChildren();
+        state.svgString = null;
+        state.sanitized = null;
+        stats.cardDisposed += 1;
+      }
+    };
+
+    // View preference is restored before the first paint so a remembered
+    // "source" view never flashes a diagram.
+    setView(state.view);
+    stats.cardBuilt += 1;
+    // Property (not attribute) so the QA panel / harness can reach the card
+    // object from its DOM node without the plugin exposing a global registry.
+    root.__mmsCard = card;
+    return card;
+  }
+
+  MMS.createCard = createCard;
+})(typeof globalThis !== 'undefined' ? globalThis : this);

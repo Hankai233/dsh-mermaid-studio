@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>dsh-mermaid-studio harness</title>
+    <style>
+      :root { color-scheme: light; }
+      body { margin: 0; font: 13px/1.5 system-ui, sans-serif; display: flex; }
+      #sidebar { width: 220px; border-right: 1px solid #ddd; padding: 8px; }
+      #chat { flex: 1; padding: 12px; min-height: 100vh; }
+      .md-code-block { border: 1px solid #e2e2e2; border-radius: 8px; margin: 8px 0; overflow: hidden; }
+      .md-code-block [data-code-block-banner] {
+        display: flex; justify-content: space-between; align-items: center;
+        background: #f5f6f8; padding: 2px 8px; font-size: 11px; color: #666;
+      }
+      .md-code-block [data-code-block-content] { padding: 6px 8px; max-height: 220px; overflow: auto; }
+      .md-code-block pre { margin: 0; font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
+      .hidden-panel { display: none; }
+      body.has-dark { background: #1b1c20; color: #d8d8d8; }
+      body.has-dark .md-code-block { border-color: #33363c; }
+      body.has-dark .md-code-block [data-code-block-banner] { background: #26282d; color: #aaa; }
+    </style>
+  </head>
+  <body>
+    <aside id="sidebar">
+      <div id="sidebar-mount"></div>
+    </aside>
+    <main id="chat">
+      <div data-slot="conversation.chat.flow" id="flow"></div>
+      <div id="outside-flow"></div>
+    </main>
+
+    <script>
+      'use strict';
+      // ── fake host pieces ────────────────────────────────────────────────
+      window.__loadedModules = [];
+      window.__ModuleLoader__ = {
+        load: function (mod) {
+          window.__loadedModules.push(mod.id);
+          try {
+            var exp = mod.factory(function () {
+              throw new Error('require() unavailable in harness');
+            });
+            window.__modExports = exp;
+          } catch (error) {
+            window.__loadError = String(error && error.stack ? error.stack : error);
+          }
+        }
+      };
+
+      var statsKeys = [];
+      window.__ctx = {
+        effect: function (fn) {
+          var dispose = fn();
+          window.__disposeHook = dispose;
+          return function () {};
+        },
+        on: function () {
+          return function () {};
+        },
+        inject: function (_services, cb) {
+          if (typeof cb === 'function') cb({});
+        },
+        get: function () {
+          return null;
+        },
+        slots: { inject: function () {}, register: function () {} }
+      };
+
+      window.__boot = function () {
+        if (window.__loadError) return 'load-error';
+        if (!window.__modExports || typeof window.__modExports.apply !== 'function') return 'no-apply';
+        window.__modExports.apply(window.__ctx);
+        return 'ok';
+      };
+
+      // ── fence builder (mirrors the host's real markup) ──────────────────
+      function makeFence(source, lang, options) {
+        var opts = options || {};
+        var block = document.createElement('div');
+        block.className = 'md-code-block';
+        block.setAttribute('data-code-wrap', '');
+        var banner = document.createElement('div');
+        banner.setAttribute('data-code-block-banner', '');
+        var heading = document.createElement('div');
+        heading.setAttribute('data-text-interaction-exclude', '');
+        heading.textContent = lang === undefined ? 'mermaid' : lang;
+        var copy = document.createElement('div');
+        copy.textContent = '复制';
+        banner.appendChild(heading);
+        banner.appendChild(copy);
+        var content = document.createElement('div');
+        content.setAttribute('data-code-block-content', '');
+        var pre = document.createElement('pre');
+        var code = document.createElement('code');
+        if (opts.shiki) {
+          // the completed shiki path: line spans, no language class
+          source.split('\n').forEach(function (line) {
+            var span = document.createElement('span');
+            span.className = 'line';
+            span.textContent = line;
+            code.appendChild(span);
+            code.appendChild(document.createTextNode('\n'));
+          });
+        } else {
+          code.textContent = source;
+        }
+        pre.appendChild(code);
+        content.appendChild(pre);
+        block.appendChild(banner);
+        block.appendChild(content);
+        return block;
+      }
+
+      window.__makeFence = makeFence;
+
+      window.__addFence = function (source, lang, options) {
+        var opts = options || {};
+        var block = makeFence(source, lang, opts);
+        var host = document.getElementById(opts.where || 'flow');
+        host.appendChild(block);
+        return block;
+      };
+
+      /** Streaming simulation: rewrite the text node in place, as the host does. */
+      /** Fresh fences in a clean flow; resolves once every card has left "pending". */
+      window.__reset = async function (specs) {
+        document.getElementById('flow').innerHTML = '';
+        await new Promise(function (r) { setTimeout(r, 120); });
+        var blocks = specs.map(function (spec) {
+          return window.__addFence(spec.source, spec.lang, spec.options || {});
+        });
+        // Lazy rendering only starts for what is on screen; bring the new
+        // fences into view so "waiting for ready" cannot hang on an off-screen
+        // card. scrollIntoView is unreliable inside the transformed stage, so
+        // scroll the window by measured offsets instead.
+        blocks.forEach(function (block) {
+          var rect = block.getBoundingClientRect();
+          window.scrollTo(0, Math.max(0, window.scrollY + rect.top - 160));
+        });
+        await window.__waitFor(function () {
+          return blocks.every(function (block) {
+            var card = block.previousElementSibling;
+            return card && card.classList.contains('mms-card') && card.getAttribute('data-mms-state') !== 'pending';
+          });
+        }, 30000);
+        return blocks;
+      };
+
+      window.__setFenceSource = function (block, next) {
+        var code = block.querySelector('[data-code-block-content] code');
+        if (!code) return false;
+        code.textContent = next;
+        return true;
+      };
+
+      window.__setDark = function (on) {
+        if (on) document.body.setAttribute('data-ds-dark-theme', '');
+        else document.body.removeAttribute('data-ds-dark-theme');
+        document.body.classList.toggle('has-dark', !!on);
+      };
+
+      window.__stats = function () {
+        return window.__mmsStats || null;
+      };
+
+      window.__cards = function () {
+        return Array.from(document.querySelectorAll('.mms-card')).map(function (card) {
+          return {
+            state: card.getAttribute('data-mms-state'),
+            view: card.getAttribute('data-view'),
+            key: card.getAttribute('data-mms-key'),
+            source: card.querySelector('.mms-error-detail')
+              ? card.querySelector('.mms-error-detail').textContent
+              : '',
+            note: card.querySelector('.mms-note') ? card.querySelector('.mms-note').textContent : '',
+            hasSvg: !!card.querySelector('.mms-stage svg'),
+            nextIsBlock: !!(card.nextElementSibling && card.nextElementSibling.classList.contains('md-code-block'))
+          };
+        });
+      };
+
+function openExistingDb(name, storeName) {
+        return indexedDB.databases().then(function (list) {
+          var exists = list.some(function (entry) { return entry.name === (name || 'dsh-mermaid-studio'); });
+          if (!exists) return null;
+          return new Promise(function (resolve) {
+            var request = indexedDB.open(name || 'dsh-mermaid-studio');
+            request.onsuccess = function () { resolve(request.result); };
+            request.onerror = function () { resolve(null); };
+          }).then(function (db) {
+            if (!db) return null;
+            if (!db.objectStoreNames.contains(storeName || 'diagrams')) { db.close(); return null; }
+            return db;
+          });
+        });
+      }
+      window.__openExistingDb = openExistingDb;
+
+      window.__idbRecordCount = function (name, storeName) {
+        return openExistingDb(name, storeName).then(function (db) {
+          if (!db) return 0;
+          return new Promise(function (resolve) {
+            var request = db.transaction(storeName || 'diagrams', 'readonly').objectStore(storeName || 'diagrams').count();
+            request.onsuccess = function () { db.close(); resolve(request.result); };
+            request.onerror = function () { db.close(); resolve(-1); };
+          });
+        });
+      };
+
+      window.__idbAll = function (name, storeName) {
+        return openExistingDb(name, storeName).then(function (db) {
+          if (!db) return [];
+          return new Promise(function (resolve) {
+            var request = db.transaction(storeName || 'diagrams', 'readonly').objectStore(storeName || 'diagrams').getAll();
+            request.onsuccess = function () { db.close(); resolve(request.result || []); };
+            request.onerror = function () { db.close(); resolve([]); };
+          });
+        });
+      };
+
+      window.__idbSeed = function (record) {
+        return new Promise(function (resolve) {
+          var request = indexedDB.open('dsh-mermaid-studio', 1);
+          request.onupgradeneeded = function () {
+            var db = request.result;
+            if (!db.objectStoreNames.contains('diagrams')) db.createObjectStore('diagrams', { keyPath: 'key' });
+          };
+          request.onsuccess = function () {
+            var db = request.result;
+            var tx = db.transaction('diagrams', 'readwrite');
+            tx.objectStore('diagrams').put(record);
+            tx.oncomplete = function () { db.close(); resolve(true); };
+            tx.onerror = function () { db.close(); resolve(false); };
+          };
+        });
+      };
+
+      window.__databases = function () {
+        if (!indexedDB.databases) return Promise.resolve(['unsupported']);
+        return indexedDB.databases().then(function (list) {
+          return list.map(function (entry) { return entry.name; });
+        });
+      };
+
+      window.__mmsKeys = function () {
+        var out = [];
+        for (var i = 0; i < localStorage.length; i += 1) {
+          var key = localStorage.key(i);
+          if (key && key.indexOf('mms:') === 0) out.push(key);
+        }
+        return out;
+      };
+    </script>
+    <script src="/lib/client.js"></script>
+  </body>
+</html>

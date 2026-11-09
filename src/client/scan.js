@@ -1,0 +1,628 @@
+/* ── scan.js — find fences in the conversation, keep one card per fence ─────
+ *
+ * Scope: only inside `[data-slot="conversation.chat.flow"]`. Anything rendered
+ * elsewhere (sidebar previews, settings samples, plugin pages) is left alone —
+ * rendering it would also write its full text into a 30-day store, which is a
+ * data-boundary change nobody asked for.
+ *
+ * Identity: a WeakMap from the host's block element to this plugin's card.
+ * `data-mms-key` is a cache key, and five identical fences share one cache key;
+ * reconciling by key would collapse them into a single card. So reconciliation
+ * walks *nodes*, and the attribute is only for debugging and assertions.
+ *
+ * Orphan sweep: React can replace a code block wholesale. The card is a sibling,
+ * so it is not in `removedNodes`; without the adjacency check below the plugin
+ * would leave a second card behind (design P0-9).
+ */
+(function (g) {
+  'use strict';
+  var MMS = g.__MMS__ || (g.__MMS__ = {});
+
+  function idle(fn) {
+    if (typeof g.requestIdleCallback === 'function') {
+      g.requestIdleCallback(fn, { timeout: 300 });
+      return;
+    }
+    setTimeout(fn, MMS.CONFIG.SCAN_IDLE_FALLBACK_MS);
+  }
+
+  function startScanner(app) {
+    var doc = g.document;
+    var roots = new Map();
+    var disposed = false;
+    var io = null;
+    var uidSeq = 0;
+
+    if (typeof g.IntersectionObserver === 'function' && MMS.CONFIG.LAZY_RENDER) {
+      io = new g.IntersectionObserver(
+        function (entries) {
+          for (var i = 0; i < entries.length; i += 1) {
+            var entry = entries[i];
+            if (!entry.isIntersecting) continue;
+            var record = cardStates.get(entry.target);
+            if (!record) continue;
+            record.visible = true;
+            io.unobserve(entry.target);
+            scheduleRender(record, 'visible');
+          }
+        },
+        { rootMargin: '200px 0px' }
+      );
+    }
+
+    var blockStates = new WeakMap();
+    /**
+     * Lazy rendering observes the CARD, not the code block: in the default
+     * "diagram" view the code block is display:none, and an IntersectionObserver
+     * never fires for a hidden target — the card would wait for a viewport entry
+     * that can never happen. (The harness caught exactly this.)
+     */
+    var cardStates = new WeakMap();
+
+    function stateOf(block) {
+      return blockStates.get(block) || null;
+    }
+
+    function uid(prefix) {
+      uidSeq += 1;
+      return prefix + '-' + uidSeq;
+    }
+
+    /**
+     * Privacy rule for the fallback path: only a block whose nearest slot is a
+     * conversation slot may render. A block with no slot ancestor at all is
+     * accepted, because that is what an older host without slot markers looks
+     * like — the rule has to degrade, not disappear.
+     */
+    function inConversationScope(block) {
+      var slot = block.closest ? block.closest('[data-slot]') : null;
+      if (!slot) return true;
+      return /^conversation\./.test(slot.getAttribute('data-slot') || '');
+    }
+
+    // ── root management ────────────────────────────────────────────────────
+    function observeRoot(root, options) {
+      if (roots.has(root)) return;
+      var record = {
+        root: root,
+        fallback: !!(options && options.fallback),
+        observer: null,
+        candidates: new Set(),
+        batchPending: false,
+        cards: new Map() // block -> blockRecord
+      };
+      record.observer = new g.MutationObserver(function (mutations) {
+        handleMutations(record, mutations);
+      });
+      record.observer.observe(root, { childList: true, subtree: true, characterData: true });
+      roots.set(root, record);
+      collectAll(record);
+    }
+
+    function dropRoot(root) {
+      var record = roots.get(root);
+      if (!record) return;
+      record.observer.disconnect();
+      record.cards.forEach(function (blockRecord) {
+        disposeRecord(blockRecord);
+      });
+      record.cards.clear();
+      if (io) {
+        record.cards.forEach(function (blockRecord) {
+          if (blockRecord.card) io.unobserve(blockRecord.card.el);
+        });
+        record.candidates.forEach(function (block) {
+          io.unobserve(block);
+        });
+      }
+      roots.delete(root);
+    }
+
+    function collectAll(record) {
+      var blocks = record.root.querySelectorAll(MMS.fence.SELECTORS.block);
+      for (var i = 0; i < blocks.length; i += 1) {
+        candidate(record, blocks[i]);
+      }
+      flush(record);
+    }
+
+    function nearestBlock(node) {
+      if (!node) return null;
+      var element = node.nodeType === 1 ? node : node.parentElement;
+      if (!element || !element.closest) return null;
+      return element.closest(MMS.fence.SELECTORS.block);
+    }
+
+    function handleMutations(record, mutations) {
+      for (var i = 0; i < mutations.length; i += 1) {
+        var mutation = mutations[i];
+        if (mutation.type === 'characterData') {
+          var target = nearestBlock(mutation.target.parentElement || mutation.target);
+          if (target) candidate(record, target);
+          continue;
+        }
+        var added = mutation.addedNodes;
+        for (var a = 0; a < added.length; a += 1) {
+          var node = added[a];
+          if (node.nodeType !== 1) continue;
+          if (node.matches && node.matches(MMS.fence.SELECTORS.block)) candidate(record, node);
+          if (node.querySelectorAll) {
+            var inner = node.querySelectorAll(MMS.fence.SELECTORS.block);
+            for (var b = 0; b < inner.length; b += 1) candidate(record, inner[b]);
+          }
+        }
+        var removed = mutation.removedNodes;
+        for (var r = 0; r < removed.length; r += 1) {
+          var gone = removed[r];
+          if (gone.nodeType !== 1) continue;
+          record.cards.forEach(function (blockRecord, block) {
+            if (block === gone || gone.contains(block)) disposeRecord(blockRecord);
+          });
+        }
+      }
+      flush(record);
+    }
+
+    function candidate(record, block) {
+      if (!block || !block.isConnected) return;
+      record.candidates.add(block);
+      if (record.batchPending) return;
+      record.batchPending = true;
+      idle(function () {
+        record.batchPending = false;
+        flush(record);
+      });
+    }
+
+    function flush(record) {
+      if (disposed) return;
+      var list = Array.from(record.candidates).slice(0, MMS.CONFIG.BATCH_MAX);
+      record.candidates.clear();
+      for (var i = 0; i < list.length; i += 1) {
+        try {
+          examine(record, list[i]);
+        } catch (error) {
+          app.stats.error('examine: ' + error.message);
+        }
+      }
+      sweepOrphans(record);
+    }
+
+    // ── one candidate ──────────────────────────────────────────────────────
+    /**
+     * Decide what this block is now. Streaming rewrites text under the same
+     * node, so the decision has to be debounced: a fence mid-token would render
+     * a syntax error, then immediately be replaced.
+     */
+    function examine(record, block) {
+      if (disposed || !block.isConnected) return;
+      if (!record.root.contains(block)) return;
+      if (MMS.fence.inOwnCard(block) || MMS.fence.inExcludedRegion(block)) return;
+      if (record.fallback && !inConversationScope(block)) return;
+
+      var existing = record.cards.get(block);
+      var fence;
+      try {
+        fence = MMS.fence.parseFence(block);
+      } catch (error) {
+        app.stats.fenceMiss += 1;
+        app.stats.error('parseFence: ' + error.message);
+        return;
+      }
+
+      if (!fence) {
+        // The host rewrote this block into something that is not a mermaid
+        // fence (language label changed, content replaced).
+        if (existing) {
+          disposeRecord(existing);
+          record.cards.delete(block);
+        }
+        return;
+      }
+
+      if (fence.empty) {
+        if (existing) {
+          disposeRecord(existing);
+          record.cards.delete(block);
+        }
+        return;
+      }
+
+      if (existing && existing.source === fence.source && !existing.dirty) {
+        if (existing.card && !existing.card.el.isConnected) {
+          existing.card.mount(block);
+        }
+        return;
+      }
+
+      if (fence.overLong) {
+        var created = createRecord(record, block, fence);
+        record.cards.set(block, created);
+        created.card.showOverLong();
+        return;
+      }
+
+      var changed = !!existing;
+      if (existing) clearTimer(existing);
+      var blockRecord = existing || createRecord(record, block, fence);
+      if (!existing) record.cards.set(block, blockRecord);
+
+      blockRecord.fence = fence;
+      blockRecord.source = fence.source;
+      blockRecord.key = keyFor(fence.source, block);
+      blockRecord.card.el.setAttribute('data-mms-key', blockRecord.key.slice(0, 16));
+      blockRecord.dirty = false;
+      if (changed) {
+        // Text changed under an existing card: mark the in-flight job stale and
+        // wait for the text to go quiet before rendering again.
+        if (blockRecord.job) blockRecord.job.superseded = true;
+        blockRecord.job = null;
+        if (blockRecord.card.state.phase === 'ready') {
+          // Already showing an older diagram: swap it without re-mounting.
+          blockRecord.card.showPending();
+        }
+      }
+      scheduleRender(blockRecord, 'content');
+    }
+
+    function clearTimer(record) {
+      if (record.timer) {
+        clearTimeout(record.timer);
+        record.timer = null;
+      }
+    }
+
+    function createRecord(record, block, fence) {
+      var key = keyFor(fence.source, block);
+      var card = MMS.createCard(app, {
+        key: key,
+        source: fence.source,
+        rejected: fence.rejected
+      });
+      card.mount(block);
+      var blockRecord = {
+        uid: uid('b'),
+        root: record.root,
+        block: block,
+        card: card,
+        key: key,
+        source: fence.source,
+        fence: fence,
+        visible: !io,
+        dirty: false,
+        job: null,
+        timer: null
+      };
+      if (io && !fence.overLong) io.observe(card.el);
+      blockStates.set(block, blockRecord);
+      cardStates.set(card.el, blockRecord);
+      app.stats.fenceSeen += 1;
+      return blockRecord;
+    }
+
+    function disposeRecord(blockRecord) {
+      clearTimer(blockRecord);
+      if (blockRecord.job) blockRecord.job.superseded = true;
+      blockRecord.job = null;
+      if (blockRecord.card) {
+        if (io) io.unobserve(blockRecord.card.el);
+        cardStates.delete(blockRecord.card.el);
+        blockRecord.card.dispose();
+      }
+      if (io && blockRecord.block) io.unobserve(blockRecord.block);
+      blockStates.delete(blockRecord.block);
+      var record = roots.get(blockRecord.root);
+      if (record) record.cards.delete(blockRecord.block);
+    }
+
+    function sweepOrphans(record) {
+      var doomed = [];
+      record.cards.forEach(function (blockRecord, block) {
+        var card = blockRecord.card;
+        if (!block.isConnected || !card || !card.el.isConnected) {
+          doomed.push(blockRecord);
+          return;
+        }
+        // Card must sit immediately before its block, or it belongs to a block
+        // React has already replaced.
+        if (card.el.nextElementSibling !== block) {
+          var next = card.el.nextElementSibling;
+          while (next && next.nodeType !== 1) next = next.nextElementSibling;
+          if (next !== block) doomed.push(blockRecord);
+        }
+      });
+      for (var i = 0; i < doomed.length; i += 1) disposeRecord(doomed[i]);
+    }
+
+    // ── render one record ──────────────────────────────────────────────────
+    function keyFor(source, block) {
+      var theme = app.theme();
+      return MMS.key.buildKey({
+        mermaidVersion: app.mermaidVersion(),
+        theme: theme,
+        scopeHash: app.scopeHash(),
+        themeRevision: MMS.theme.revision(block),
+        fontCode: MMS.theme.sampleFontCode(block),
+        renderConfig: MMS.renderConfig.configToken(theme, app.fontFamily(block)),
+        source: source
+      });
+    }
+
+    function scheduleRender(blockRecord, reason) {
+      if (disposed) return;
+      if (!blockRecord.visible) return; // lazy: wait for the viewport
+      if (reason === 'content') {
+        clearTimer(blockRecord);
+        blockRecord.timer = setTimeout(function () {
+          blockRecord.timer = null;
+          if (!disposed) decide(blockRecord);
+        }, MMS.CONFIG.STREAM_DEBOUNCE_MS);
+        return;
+      }
+      decide(blockRecord);
+    }
+
+    function decide(blockRecord) {
+      if (disposed || !blockRecord.block.isConnected) return;
+      var card = blockRecord.card;
+      // Over-long sources never enter the queue: mermaid would reject them (or
+      // worse, chew on them) and the engine's own limit is the same number.
+      if (blockRecord.fence && blockRecord.fence.overLong) {
+        card.showOverLong();
+        return;
+      }
+      var theme = app.theme();
+      var key = keyFor(blockRecord.source, blockRecord.block);
+      blockRecord.key = key;
+      card.key = key;
+      card.state.rejectedDirectives = !!blockRecord.fence.rejected;
+      card.el.setAttribute('data-mms-key', key.slice(0, 16));
+
+      card.showPending();
+
+      // Negative cache: streaming output produces the same broken fence over and
+      // over; without this the queue would re-render it every time. Manual retry
+      // clears the entry (app.retry), so this is never a dead end.
+      var failedAt = app.negative.get(key);
+      if (failedAt && Date.now() - failedAt < MMS.CONFIG.NEGATIVE_TTL_MS) {
+        card.showError('渲染失败', true, '5 分钟内不自动重试；点「重试」立即重新渲染');
+        return;
+      }
+
+      app.cache
+        .get(key)
+        .then(function (record) {
+          if (disposed || !blockRecord.block.isConnected) return;
+          if (blockRecord.job && blockRecord.job.superseded) return;
+          if (record) {
+            card.setSkeletonSize(record.width, record.height);
+            var ok = card.showSvg(record.svg, record.renderId, {
+              clamped: !!record.clamped
+            });
+            if (ok) return;
+          }
+          enqueue(blockRecord, key, theme);
+        })
+        .catch(function (error) {
+          app.stats.error('cache get: ' + error.message);
+          enqueue(blockRecord, key, theme);
+        });
+    }
+
+    function enqueue(blockRecord, key, theme) {
+      var job = {
+        uid: uid('j'),
+        key: key,
+        source: blockRecord.source,
+        theme: theme,
+        renderId: app.nextRenderId(blockRecord.uid),
+        fontFamily: app.fontFamily(blockRecord.block),
+        superseded: false,
+        stale: function () {
+          return job.superseded || !blockRecord.block.isConnected;
+        }
+      };
+      blockRecord.job = job;
+      blockRecord.uid = job.uid;
+      app.stats.renderCount += 1;
+      app.stats.publish();
+      app.queue.push(job);
+    }
+
+    // ── outcomes from the queue ────────────────────────────────────────────
+    function onOutcome(outcome) {
+      if (disposed) return;
+      if (outcome.type === 'breaker') {
+        roots.forEach(function (record) {
+          record.cards.forEach(function (blockRecord) {
+            if (blockRecord.card) blockRecord.card.setBreakerVisible(true);
+          });
+        });
+        return;
+      }
+      if (outcome.type === 'export') return; // handled by the export resolver
+      var target = findRecordByUid(outcome.uid);
+      if (!target || !target.card) return;
+      if (target.job && target.job.uid !== outcome.uid) return; // superseded attempt
+
+      if (outcome.type === 'ready') {
+        var record = app.cache.makeRecord({
+          key: target.key,
+          source: target.source,
+          svg: outcome.svg,
+          width: 0,
+          height: 0,
+          theme: app.theme(),
+          mermaidVersion: app.mermaidVersion(),
+          renderId: outcome.renderId,
+          scopeHash: app.scopeHash()
+        });
+        var injected = target.card.showSvg(outcome.svg, outcome.renderId, {});
+        if (!injected) {
+          app.stats.error('injection rejected');
+          return;
+        }
+        var svg = target.card.getSvg();
+        if (svg) {
+          try {
+            var box = svg.getBBox();
+            record.width = box.width;
+            record.height = box.height;
+          } catch (error) {
+            /* bbox unavailable: the skeleton simply has no fixed size */
+          }
+        }
+        app.cache.put(record).catch(function () {});
+        return;
+      }
+
+      if (outcome.type === 'timeout') {
+        target.card.showError('渲染超时（15 秒）', true, '可以重试；若连续超时请点「重置渲染器」');
+        return;
+      }
+
+      if (outcome.type === 'error') {
+        var message = (outcome.error && outcome.error.message) || '渲染失败';
+        target.card.showError('渲染失败', true, message);
+        app.negative.set(target.key, Date.now());
+        return;
+      }
+    }
+
+    function findRecordByUid(target) {
+      var found = null;
+      roots.forEach(function (record) {
+        record.cards.forEach(function (blockRecord) {
+          if (found) return;
+          if (blockRecord.job && blockRecord.job.uid === target) found = blockRecord;
+          else if (blockRecord.uid === target) found = blockRecord;
+        });
+      });
+      return found;
+    }
+
+    // ── theme changes ──────────────────────────────────────────────────────
+    function rerenderAll() {
+      roots.forEach(function (record) {
+        record.cards.forEach(function (blockRecord) {
+          if (!blockRecord.block.isConnected) return;
+          var key = keyFor(blockRecord.source, blockRecord.block);
+          blockRecord.key = key;
+          blockRecord.card.key = key;
+          // Cache first: the other theme's SVG is usually already there.
+          decide(blockRecord);
+        });
+      });
+    }
+
+    function disposeAll() {
+      disposed = true;
+      clearTimeout(scopeFallbackTimer);
+      roots.forEach(function (record, root) {
+        dropRoot(root);
+      });
+      roots.clear();
+      if (io) io.disconnect();
+    }
+
+    // ── bootstrapping ──────────────────────────────────────────────────────
+    // Roots appear and disappear with the session; a fresh root gets a full
+    // scan (observeRoot → collectAll), a removed one is torn down with its cards.
+    var rootWatcher = new g.MutationObserver(function (mutations) {
+      for (var i = 0; i < mutations.length; i += 1) {
+        var mutation = mutations[i];
+        for (var a = 0; a < mutation.addedNodes.length; a += 1) {
+          var node = mutation.addedNodes[a];
+          if (node.nodeType !== 1) continue;
+          if (node.matches && node.matches(MMS.fence.SELECTORS.root)) observeRoot(node);
+          if (node.querySelectorAll) {
+            var inner = node.querySelectorAll(MMS.fence.SELECTORS.root);
+            for (var b = 0; b < inner.length; b += 1) observeRoot(inner[b]);
+          }
+        }
+        for (var r = 0; r < mutation.removedNodes.length; r += 1) {
+          var gone = mutation.removedNodes[r];
+          if (gone.nodeType !== 1) continue;
+          roots.forEach(function (record, root) {
+            if (root === gone || gone.contains(root)) dropRoot(root);
+          });
+        }
+      }
+    });
+
+    rootWatcher.observe(doc.body, { childList: true, subtree: true });
+
+    var initial = doc.querySelectorAll(MMS.fence.SELECTORS.root);
+    for (var i = 0; i < initial.length; i += 1) observeRoot(initial[i]);
+
+    // The slot anchor is a host contract, not a promise. If it is missing but
+    // fences exist, observing nothing would look exactly like "plugin broken".
+    // Fall back to the document, keep the conversation-scope filter, and record
+    // the degradation in __mmsStats.scopeFallback.
+    var scopeFallbackTimer = setTimeout(function () {
+      if (disposed || roots.size > 0) return;
+      if (!doc.querySelector(MMS.fence.SELECTORS.block)) return;
+      app.stats.scopeFallback = 1;
+      app.stats.publish();
+      console.warn('[mms] chat flow slot not found; using conversation-scope fallback');
+      observeRoot(doc.body, { fallback: true });
+    }, 3000);
+
+    return {
+      rerenderAll: rerenderAll,
+      rerenderCard: function (card) {
+        var hit = null;
+        roots.forEach(function (record) {
+          record.cards.forEach(function (blockRecord) {
+            if (!hit && blockRecord.card === card) hit = blockRecord;
+          });
+        });
+        if (!hit) return false;
+        if (hit.job) hit.job.superseded = true;
+        hit.job = null;
+        decide(hit);
+        return true;
+      },
+      dispose: disposeAll,
+      rescan: function () {
+        roots.forEach(function (record) {
+          collectAll(record);
+        });
+      },
+      rootCount: function () {
+        return roots.size;
+      },
+      cardCount: function () {
+        var total = 0;
+        roots.forEach(function (record) {
+          total += record.cards.size;
+        });
+        return total;
+      },
+      /** QA: per-fence state, so a stuck card can be explained without guessing. */
+      debug: function () {
+        var out = [];
+        roots.forEach(function (record) {
+          record.cards.forEach(function (blockRecord, block) {
+            out.push({
+              uid: blockRecord.uid,
+              key: blockRecord.key.slice(0, 16),
+              connected: !!block.isConnected,
+              visible: !!blockRecord.visible,
+              hasJob: !!blockRecord.job,
+              jobUid: blockRecord.job ? blockRecord.job.uid : null,
+              superseded: blockRecord.job ? !!blockRecord.job.superseded : null,
+              pendingTimer: !!blockRecord.timer,
+              phase: blockRecord.card ? blockRecord.card.state.phase : null,
+              sourceLen: blockRecord.source ? blockRecord.source.length : 0
+            });
+          });
+        });
+        return out;
+      },
+      outcomeHandler: onOutcome
+    };
+  }
+
+  MMS.startScanner = startScanner;
+})(typeof globalThis !== 'undefined' ? globalThis : this);

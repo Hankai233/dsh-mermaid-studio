@@ -1,0 +1,18 @@
+{
+  "name": "dsh-mermaid-probe",
+  "version": "0.0.0",
+  "private": true,
+  "description": "一次性探针插件：坐实 UNK-04 / UNK-06 的运行时契约（factory 实参 / theme 取值 / 配置注入通道）。用完即删。",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "platform": "web", "inject": [] }
+  },
+  "engines": { "dsh": ">=0.2.1-rc.2" }
+}

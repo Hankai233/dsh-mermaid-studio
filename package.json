@@ -1,0 +1,42 @@
+{
+  "name": "dsh-mermaid-studio",
+  "version": "0.1.0",
+  "description": "Render mermaid fences in DeepSeek Harness chat as diagrams: zoom/pan, fullscreen, SVG/PNG/JPG export, diagram/source toggle, light/dark three-state theme, and IndexedDB-persisted render results so a revisited conversation does not re-render. DSH 对话中的 mermaid 围栏实时成图：缩放/全屏/导出、图源切换、深浅色三态，渲染结果落 IndexedDB，切回会话零重渲染。",
+  "license": "GPL-3.0-or-later",
+  "author": "Hanka",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.2"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "harness": "node qa/harness/run.mjs"
+  },
+  "devDependencies": {
+    "mermaid": "11.17.2"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  }
+}
