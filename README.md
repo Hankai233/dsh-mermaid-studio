@@ -1,6 +1,6 @@
 # dsh-mermaid-studio
 
-[中文](README.md) · [English](README.en.md)
+中文 · [English](README.en.md)
 
 DSH 插件。对话里的 mermaid 围栏渲染成图，可以缩放、全屏、导出 SVG；渲染结果存在浏览器本地，切回同一张图不再重画。
 
