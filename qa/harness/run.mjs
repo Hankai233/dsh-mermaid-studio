@@ -405,6 +405,16 @@ test('5', async (page) => {
     out.push(window.__A('overlay 打开', true, !!overlay, !!overlay));
     out.push(window.__A('body 滚动被锁', 'hidden', document.body.style.overflow));
     out.push(window.__A('aria-modal 宣告', 'true', overlay.getAttribute('aria-modal')));
+    const row = overlay.querySelector('.mms-float');
+    out.push(window.__A('全屏里也是悬浮按钮行', true, !!row, !!row));
+    out.push(window.__A('全屏没有旧的文字工具条', null, overlay.querySelector('.mms-bar')));
+    const rowButtons = Array.from(row.querySelectorAll('button'));
+    out.push(window.__A('全屏按钮顺序（图标）', '放大|缩小|重置缩放（适应全图）|导出为 SVG 文件|退出全屏（Esc）', rowButtons.map((b) => b.getAttribute('aria-label')).join('|')));
+    out.push(window.__A('全屏按钮都是 SVG 图标、没有文字', rowButtons.length + '/' + rowButtons.length, rowButtons.filter((b) => b.querySelector('svg') && !b.textContent.trim()).length + '/' + rowButtons.length));
+    out.push(window.__A('全屏图标与卡片同一套规格', '5', String(rowButtons.filter((b) => {
+      const svg = b.querySelector('svg');
+      return svg && svg.getAttribute('viewBox') === '0 0 16 16' && svg.getAttribute('stroke-width') === '1.6' && svg.getAttribute('stroke') === 'currentColor';
+    }).length)));
     // focus trap: focus pulled back inside
     const outside = document.getElementById('sidebar-mount');
     outside.tabIndex = 0;
@@ -420,6 +430,58 @@ test('5', async (page) => {
     outside.tabIndex = -1;
     return out;
   });
+});
+
+/* ── 5b: overlay row wakes on movement, fades when still ──────────────── */
+test('5b', async (page) => {
+  const out = [];
+  await page.hover('.mms-card');
+  await page.waitForTimeout(150);
+  await page.evaluate(() => {
+    Array.from(document.querySelectorAll('.mms-card .mms-float button'))
+      .find((b) => b.getAttribute('aria-label') === '全屏查看')
+      .click();
+  });
+  await page.waitForSelector('[data-mms-overlay]');
+  await page.waitForTimeout(250);
+
+  const initial = await page.evaluate(() => getComputedStyle(document.querySelector('[data-mms-overlay] .mms-float')).opacity);
+  out.push({ name: '打开时按钮行可见', expected: '1', actual: initial, pass: initial === '1' });
+
+  await page.waitForTimeout(2200);
+  const faded = await page.evaluate(() => getComputedStyle(document.querySelector('[data-mms-overlay] .mms-float')).opacity);
+  out.push({ name: '静止一会儿后自动淡出', expected: '0', actual: faded, pass: faded === '0' });
+
+  await page.mouse.move(500, 350);
+  await page.mouse.move(530, 370);
+  await page.waitForTimeout(150);
+  const woke = await page.evaluate(() => getComputedStyle(document.querySelector('[data-mms-overlay] .mms-float')).opacity);
+  out.push({ name: '移动指针后重新出现', expected: '1', actual: woke, pass: woke === '1' });
+
+  const zoom = await page.evaluate(async () => {
+    const row = document.querySelector('[data-mms-overlay] .mms-float');
+    const read = () => (row.querySelector('.mms-float-scale') || {}).textContent;
+    const before = read();
+    Array.from(row.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === '放大').click();
+    await new Promise((r) => setTimeout(r, 120));
+    const afterPlus = read();
+    Array.from(row.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === '缩小').click();
+    Array.from(row.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === '缩小').click();
+    await new Promise((r) => setTimeout(r, 120));
+    const afterMinus = read();
+    Array.from(row.querySelectorAll('button')).find((b) => (b.getAttribute('aria-label') || '').indexOf('重置缩放') === 0).click();
+    await new Promise((r) => setTimeout(r, 200));
+    return { before, afterPlus, afterMinus, afterReset: read() };
+  });
+  out.push({ name: '全屏放大按钮生效', expected: '百分比变大', actual: zoom.afterPlus, pass: parseInt(zoom.afterPlus, 10) > parseInt(zoom.before, 10) });
+  out.push({ name: '全屏缩小按钮生效', expected: '百分比变小', actual: zoom.afterMinus, pass: parseInt(zoom.afterMinus, 10) < parseInt(zoom.before, 10) });
+  out.push({ name: '全屏重置回到适应全图', expected: zoom.before, actual: zoom.afterReset, pass: Math.abs(parseInt(zoom.afterReset, 10) - parseInt(zoom.before, 10)) <= 1 });
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(200);
+  const closed = await page.evaluate(() => !!document.querySelector('[data-mms-overlay]'));
+  out.push({ name: 'Esc 关闭全屏', expected: false, actual: closed, pass: closed === false });
+  return out;
 });
 
 /* ── 6: export structure ─────────────────────────────────────────────────── */

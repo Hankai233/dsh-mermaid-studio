@@ -44,7 +44,7 @@ The engine is mermaid 11.17.2, bundled into the plugin. No network access.
 - Ctrl/⌘ + wheel zooms around the pointer; a plain wheel still scrolls the page.
 - Drag to pan, with moves coalesced per frame (20 consecutive `pointermove` events result in 1 style write). Double-click toggles between "fit page" and 100%.
 - The zoom ceiling is derived from the diagram's actual size (`LAYER_MAX_PX = 8192`) so the composited layer stays inside the GPU texture budget.
-- Fullscreen is a CSS overlay, not the Fullscreen API: Esc closes it, focus returns to the trigger, and `body.style.overflow` is restored to whatever it was.
+- Fullscreen is a CSS overlay, not the Fullscreen API: Esc closes it, focus returns to the trigger, and `body.style.overflow` is restored to whatever it was. Inside it the same icon row floats at the top-right — it wakes when the pointer moves and fades after 1.6 s of stillness (zoom in / zoom out / reset / export / exit).
 
 ### Export
 

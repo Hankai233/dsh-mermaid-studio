@@ -25,6 +25,11 @@
       if (!overlay) return;
       if (controller) controller.dispose();
       controller = null;
+      overlay.removeEventListener('pointermove', wakeRow);
+      if (rowTimer) {
+        clearTimeout(rowTimer);
+        rowTimer = null;
+      }
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       overlay = null;
       if (g.document.body) g.document.body.style.overflow = previousOverflow === null ? '' : previousOverflow;
@@ -63,15 +68,38 @@
       }
     }
 
-    function button(label, action, title, extra) {
-      var el = g.document.createElement('button');
-      el.type = 'button';
-      el.className = 'mms-btn' + (extra ? ' ' + extra : '');
-      el.textContent = label;
-      el.title = title || label;
-      el.setAttribute('aria-label', title || label);
-      el.addEventListener('click', action);
-      return el;
+    // Same construction as the card's controls, so both surfaces read alike.
+    function control(kind, title, action) {
+      var button = g.document.createElement('button');
+      button.type = 'button';
+      button.className = 'mms-btn mms-btn-icon';
+      button.title = title;
+      button.setAttribute('aria-label', title);
+      if (MMS.icons) button.appendChild(MMS.icons.build(MMS.icons.paths[kind]));
+      button.addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        action(event);
+      });
+      return button;
+    }
+
+    // In fullscreen the whole screen is the diagram, so "hover over the diagram"
+    // would mean "always visible". Instead the row wakes on pointer movement and
+    // fades after a moment of stillness, which keeps the canvas clear but brings
+    // the controls back the instant the user reaches for them.
+    var rowTimer = null;
+    function wakeRow() {
+      if (!overlay) return;
+      overlay.setAttribute('data-row', 'on');
+      if (rowTimer) clearTimeout(rowTimer);
+      rowTimer = setTimeout(function () {
+        rowTimer = null;
+        if (!overlay) return;
+        var row = overlay.querySelector('.mms-float');
+        if (row && row.contains(g.document.activeElement)) return;
+        overlay.removeAttribute('data-row');
+      }, 1600);
     }
 
     function open(card) {
@@ -96,18 +124,11 @@
       shell.tabIndex = -1;
 
       var bar = doc.createElement('div');
-      bar.className = 'mms-bar';
+      bar.className = 'mms-float';
       bar.setAttribute('role', 'toolbar');
-      bar.setAttribute('aria-label', '图表工具');
-      var badge = doc.createElement('span');
-      badge.className = 'mms-badge';
-      badge.textContent = 'mermaid';
-      bar.appendChild(badge);
-
-      var actions = doc.createElement('div');
-      actions.className = 'mms-actions';
+      bar.setAttribute('aria-label', '全屏图表工具');
       var scaleLabel = doc.createElement('span');
-      scaleLabel.className = 'mms-scale';
+      scaleLabel.className = 'mms-float-scale';
       scaleLabel.textContent = '100%';
 
       var viewport = doc.createElement('div');
@@ -121,22 +142,19 @@
       stage.appendChild(svg);
       viewport.appendChild(stage);
 
-      actions.appendChild(button('−', function () { controller && controller.zoomBy(1 / 1.2); }, '缩小'));
-      actions.appendChild(scaleLabel);
-      actions.appendChild(button('+', function () { controller && controller.zoomBy(1.2); }, '放大'));
-      actions.appendChild(button('适应宽度', function () { controller && controller.fitWidth(); }, '适应宽度'));
-      actions.appendChild(button('适应全图', function () { controller && controller.fitPage(); }, '适应全图'));
-      actions.appendChild(
-        button('导出 SVG', function () {
+      bar.appendChild(scaleLabel);
+      bar.appendChild(control('zoomIn', '放大', function () { controller && controller.zoomBy(1.25); }));
+      bar.appendChild(control('zoomOut', '缩小', function () { controller && controller.zoomBy(1 / 1.25); }));
+      bar.appendChild(control('reset', '重置缩放（适应全图）', function () { controller && controller.fitPage(); }));
+      bar.appendChild(
+        control('download', '导出为 SVG 文件', function () {
           if (!card.getSvg()) return;
           exporter.exportVector(card.getSvg(), card.getHash()).catch(function (error) {
             if (onExport) onExport('导出失败：' + error.message);
           });
-        }, '导出为 SVG')
+        })
       );
-      var closeBtn = button('关闭', function () { close(); }, '关闭全屏（Esc）', 'mms-btn-icon');
-      actions.appendChild(closeBtn);
-      bar.appendChild(actions);
+      bar.appendChild(control('close', '退出全屏（Esc）', function () { close(); }));
 
       shell.appendChild(bar);
       shell.appendChild(viewport);
@@ -153,6 +171,8 @@
       });
       controller.fitPage();
 
+      overlay.addEventListener('pointermove', wakeRow);
+      wakeRow();
       doc.addEventListener('keydown', onKeyDown, true);
       doc.addEventListener('focusin', onFocusIn, true);
       shell.focus();

@@ -72,8 +72,13 @@
       'M10 2.6h2.4c.55 0 1 .45 1 1V6',
       'M6 13.4H3.6c-.55 0-1-.45-1-1V10',
       'M10 13.4h2.4c.55 0 1-.45 1-1V10'
-    ]
+    ],
+    close: ['M4.7 4.7l6.6 6.6', 'M11.3 4.7l-6.6 6.6']
   };
+
+  // The fullscreen overlay builds its controls from the same set, so the two
+  // surfaces cannot drift apart visually.
+  MMS.icons = { build: icon, paths: ICONS };
 
   function iconButton(node, title, action) {
     var button = el('button', 'mms-btn mms-btn-icon');
