@@ -110,7 +110,20 @@ npm run build      # 产出 lib/，打印 sha256；同样的输入两次构建�
 npm test           # 纯逻辑单测（node --test），不需要浏览器
 ```
 
-发布：`npm publish`（账号开了 2FA，会要求一次性验证码）。`files` 里带上了 `lib/`、`cordis.patch.yml`、`icon.svg` 和 README 引用的截图，所以装包的人不需要自己构建。
+### 发布
+
+推一个版本 tag，GitHub Actions 负责发布：
+
+```powershell
+npm version patch                        # 或手改 package.json 的 version
+git push && git push origin v0.2.0       # 推 tag 才会触发
+```
+
+工作流 `.github/workflows/npm-publish.yml` 的顺序是：`npm ci` → 构建 → **校验提交进库的 `lib/` 与这次构建结果一致** → 跑单测 → `npm publish`。tag 与 `package.json` 的 version 对不上会直接失败，避免把 0.1.0 的代码发成 0.2.0。
+
+仓库 secrets 里要配 `NPM_TOKEN`：账号开了 2FA，所以得用 npm 的 **Automation** 类型 token（普通 token 会卡在一次验证码上）。
+
+`files` 里带上了 `lib/`、`cordis.patch.yml`、`icon.svg` 和 README 引用的截图，所以装包的人不需要自己构建。
 
 验收通道（那 28 条无头 Chromium 用例）不在仓库里，是本机的开发工具；仓库只带 `test/` 里的纯逻辑单测。
 
