@@ -11,11 +11,9 @@ Thumbs.db
 *.orig
 *.rej
 
-# QA artifacts: results are per-machine evidence, fixtures are generated
-qa/results/
-qa/fixtures/20-diagrams.md
-qa/fixtures/oversize.md
-qa/fixtures/same-source.md
+# The acceptance channel is local: results are per-machine evidence and the
+# fixtures are generated, so the whole directory stays out of the repo.
+qa/
 
 # Diagnostic dumps
 mms-audit-*.json
