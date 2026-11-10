@@ -16,7 +16,31 @@
       .md-code-block [data-code-block-content] { padding: 6px 8px; max-height: 220px; overflow: auto; }
       .md-code-block pre { margin: 0; font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
       .hidden-panel { display: none; }
-      body.has-dark { background: #1b1c20; color: #d8d8d8; }
+      /* The host writes these tokens; the fake shell needs them too, otherwise the
+       plugin falls back to its #fff default and dark-mode screenshots lie. */
+    body {
+      --dsw-alias-bg-base: #ffffff;
+      --dsw-alias-bg-layer-1: rgba(0, 0, 0, .03);
+      --dsw-alias-bg-layer-2: #ffffff;
+      --dsw-alias-label-primary: #1f2328;
+      --dsw-alias-label-secondary: #6b7280;
+      --dsw-alias-border-l1: rgba(0, 0, 0, .12);
+      --dsw-alias-state-business-primary: #3b82f6;
+      --dsw-alias-state-warn-label: #b27a00;
+      --dsw-alias-interactive-bg-hover: rgba(0, 0, 0, .06);
+    }
+    body.has-dark {
+      --dsw-alias-bg-base: #1b1c20;
+      --dsw-alias-bg-layer-1: rgba(255, 255, 255, .05);
+      --dsw-alias-bg-layer-2: #2b2d33;
+      --dsw-alias-label-primary: #e6e7ea;
+      --dsw-alias-label-secondary: #9aa0a6;
+      --dsw-alias-border-l1: rgba(255, 255, 255, .14);
+      --dsw-alias-state-business-primary: #6ea8fe;
+      --dsw-alias-state-warn-label: #e0b050;
+      --dsw-alias-interactive-bg-hover: rgba(255, 255, 255, .1);
+    }
+    body.has-dark { background: #1b1c20; color: #d8d8d8; }
       body.has-dark .md-code-block { border-color: #33363c; }
       body.has-dark .md-code-block [data-code-block-banner] { background: #26282d; color: #aaa; }
     </style>

@@ -1,235 +1,117 @@
 # dsh-mermaid-studio
 
-[中文](README.md) · [English](README.en.md)
+A DeepSeek Harness plugin that **renders mermaid fences in the conversation as diagrams**. Zoom, go fullscreen, export SVG — and the render result stays local, so returning to the same diagram does not redraw it.
 
-A DSH plugin that renders mermaid fences in the conversation as diagrams you can zoom, open fullscreen and export as SVG. Render results are stored in the browser, so returning to the same diagram does not redraw it.
+English | [中文](README.md)
 
-The engine is mermaid 11.17.2, bundled into the plugin. No network access.
-
----
+![Diagram card in the light theme](docs/screenshots/card-light.png)
 
 ## What it does
 
-### Fence detection
+- **Fence detection** — claims `mermaid` / `mmd` fences. The host labels them with its generic "code block" text, and the plugin still recognises them; fences with a real language name (`python`, `ts`) are never claimed.
+- **Rendering** — mermaid 11.17.2 is bundled, no network. One serial queue with a 15 s timeout and a breaker, so one bad diagram cannot hold up the rest.
+- **Cache** — memory plus IndexedDB. A hit is injected directly with no flash, and survives reloads and restarts.
+- **Gestures** — Ctrl/⌘ + wheel zooms around the pointer, drag pans, double-click toggles between fit and 1:1.
+- **Card controls** — no persistent toolbar. Hovering the diagram floats a row of icon buttons at the top-right (zoom in / zoom out / reset / source / export / fullscreen); it hides when the pointer leaves.
+- **Fullscreen** — a CSS overlay, not the system F11; Esc closes it and focus returns to the trigger. The zoom percentage is editable.
+- **Export** — SVG only, serialised from the filtered tree.
+- **Theme** — always follows the host's light/dark mode, with separate cache entries for each.
 
-- Works on `div.md-code-block` elements. The language comes from three signals in union: the banner text, a `language-*` class, and a strict first-line keyword.
-- The host renders the banner label for mermaid as the localized generic text "代码块" (code block), not as `mermaid`. The plugin hands that generic label to the first-line rule, while a fence with a real language label (`python`, `ts`, …) is still never claimed.
-- Governance keys inside `%%{init: …}%%` and frontmatter (`securityLevel`, `htmlLabels`, `maxTextSize`, `fontFamily`, `themeVariables`, …) are stripped from the source before rendering. When something was stripped, the control row shows a small "init directive ignored" note; the diagram still renders.
-- Empty fences, comment-only fences and directive-only fences get no card and never enter the queue.
+## Screenshots
 
-### Rendering
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="docs/screenshots/card-light.png" alt="Diagram card in the light theme"><br><sub>Light: the fence becomes a card; hovering floats the controls</sub></td>
+    <td align="center" width="50%"><img src="docs/screenshots/card-dark.png" alt="Diagram card in the dark theme"><br><sub>Dark: follows the host, both themes cached separately</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/source-view.png" alt="Source view"><br><sub><code>&lt;/&gt;</code> shows the source; the control row stays above the code block</sub></td>
+    <td align="center"><img src="docs/screenshots/fullscreen.png" alt="Fullscreen view"><br><sub>Fullscreen: the zoom percentage is editable</sub></td>
+  </tr>
+</table>
 
-- One serial queue, concurrency 1. mermaid's `initialize()` is global configuration; concurrent renders bleed themes into each other.
-- A 15 s timeout changes the card state but does not free the queue slot. If a render never settles (2× timeout), the current engine instance is abandoned and a fresh one continues; the event is counted as `renderIsolated`. Two consecutive timeouts open a breaker and the card offers "reset renderer".
-- The cache key reads the version injected at build time, so computing a key never evaluates the 3.5 MB bundle. The engine is evaluated only when a diagram actually needs it, split from the render into two tasks with the skeleton painted in between.
-- Lazy rendering: a fence shows a skeleton until it enters the viewport.
+## How it works
 
-### Cache
+The plugin ships as a two-half bundle: the host half only carries configuration, all UI and rendering live in the browser half. One fence goes through six steps:
 
-| Layer | Storage | Purpose |
-| --- | --- | --- |
-| L1 | in-memory `Map`, 50 entries | same-page scrolling, returning to a conversation: synchronous hit |
-| L2 | IndexedDB database `dsh-mermaid-studio` | survives reloads and restarts |
-| L3 | mermaid render | only when the first two miss |
+1. **Find the fence** — scan the host's `div.md-code-block` elements and decide the language from three signals: banner text, a `language-*` class, and a strict first-line keyword. The banner shows a localised generic label for mermaid, so the first-line rule is the fallback. A hit inserts a card *before* the code block — **the block itself is never touched** (the plugin does not write to host-owned nodes).
+2. **Strip governance keys** — `%%{init: …}%%` and frontmatter keys such as `securityLevel`, `htmlLabels`, `fontFamily` and `themeVariables` are removed, so one diagram cannot change global render settings; the control row says so when it happened.
+3. **Look up the cache** — key = `sha1(source · theme · font · engine version · sanitizer version)`. Memory first (50 entries), then IndexedDB (32 MB, 30 days, byte-based LRU).
+4. **Render** — only on a double miss, and only in the serial queue. mermaid needs a DOM, so it runs on the main thread at 50–90 ms per new diagram; the queue guarantees no concurrency (the engine's `initialize()` is global state and concurrent renders bleed themes).
+5. **Filter, then inject** — the SVG is parsed into a detached document, filtered through element/attribute whitelists, its `<style>` rebuilt through CSSOM with `#<renderId>` prefixes, and only then `importNode`d in. **Cache hits take the same exit**: stored strings are treated as untrusted input, because any same-origin script can write that database.
+6. **Uninstall cleanly** — remove cards, the `<style>`, both observers, delete the IndexedDB database and clear local keys.
 
-- 32 MB cap with byte-based LRU, 30-day expiry, and a sweep that drops expired or schema-mismatched records on write.
-- A hit is injected directly, so you never see code first and a diagram flashing in after.
-- `cacheEnabled = false` turns off L1, L2 and the negative cache, and clears existing records.
-- If IndexedDB cannot open (private mode, quota errors), the plugin uses memory only, warns once, and keeps working.
-- Keys are built from source, theme, font, engine version and sanitizer version; changing any of them produces a new entry.
-
-### Gestures
-
-- Ctrl/⌘ + wheel zooms around the pointer; a plain wheel still scrolls the page.
-- Drag to pan, with moves coalesced per frame (20 consecutive `pointermove` events result in 1 style write). Double-click toggles between "fit page" and 100%.
-- The zoom ceiling is derived from the diagram's actual size (`LAYER_MAX_PX = 8192`) so the composited layer stays inside the GPU texture budget.
-### Card controls
-
-No persistent toolbar. Hovering the diagram floats an icon row at the top-right; it hides when the pointer leaves and appears on keyboard focus as well.
-
-| Icon | Action | Behaviour |
-| --- | --- | --- |
-| Plus | Zoom in | 1.25× around the canvas centre, bounded by the per-diagram zoom ceiling |
-| Minus | Zoom out | 1 / 1.25 |
-| Circular arrow | Reset zoom | Back to the initial fit-to-width |
-| Code brackets | Diagram / source | Click again to go back. In source view the same row stays put above the code block |
-| Download | Export SVG | Exports the filtered tree |
-| Corner brackets | Fullscreen | Opens the fullscreen overlay |
-
-The icons are inline SVG: 16×16 grid, 1.6 stroke, round caps and joins, `currentColor`, on 28×28 buttons. Colour follows the theme, so hover and pressed states need no second icon set for dark mode. The buttons carry no text — their names live in `title` and `aria-label` (zoom in / zoom out / reset zoom / show source / export as SVG / fullscreen), which keeps them readable to screen readers and on hover.
-
-### Fullscreen
-
-Fullscreen is a CSS overlay, not the Fullscreen API: Esc closes it, focus returns to the trigger, and `body.style.overflow` is restored to whatever it was.
-
-In fullscreen the whole screen is the canvas, so "show on hover" would mean "always shown"; instead the row wakes when the pointer moves and fades after 1.6 s of stillness (it stays while focus is inside it). Same icon set:
-
-| Control | Action |
-| --- | --- |
-| Plus | Zoom in 1.25× |
-| Zoom percentage | Shows the current scale; click it and type a percentage, Enter or blur applies it |
-| Minus | Zoom out 1 / 1.25 |
-| Circular arrow | Reset zoom, **back to 100%** |
-| Download | Export as SVG |
-| Cross | Exit fullscreen (same as Esc) |
-
-A typed percentage still passes through the per-diagram zoom ceiling: asking for 800% gets clamped and the field then shows the applied value; a non-numeric entry snaps back to the current value. Escape inside the field only reverts that edit — it does not close the overlay. There is no source toggle in fullscreen, because there is no code block there.
-
-### Export
-
-SVG only. What gets serialized is the DOM that was already injected and filtered — not the raw string from the cache. A standalone `.svg` opens without the host CSP, so only the filtered tree is a safe deliverable.
-
-Before serializing, `xmlns`, `xmlns:xlink`, `width`/`height`/`viewBox` are filled in and a fallback font stack is appended.
-
-### Theme
-
-Always follows the host's `body[data-ds-dark-theme]`; there is no manual switch. When the host flips the mode the plugin checks the cache first, so flipping back is a hit rather than a redraw. Light and dark SVGs are separate records.
-
-### Errors and degradation
-
-| Situation | Behaviour |
-| --- | --- |
-| Syntax error | Card keeps the source, adds a collapsible error bar and a retry button; no automatic retry for 5 minutes, manual retry is immediate; nothing is written to the persistent cache |
-| Source over 50,000 chars | Straight to the error state ("source too long, skipped"); no queue entry, no retry button |
-| Rendered SVG contains blocked content | Error bar "the rendered result contains blocked content", `sanitizeRejected` +1, nothing cached |
-| Rendered SVG cannot be parsed | Error bar "the diagram markup could not be parsed", retried once with lenient parsing |
-| mermaid fails to load | Cards fall back to plain code blocks |
-| A cached SVG was tampered with | Injection blocked, badge shown, diagram re-rendered and the record overwritten |
-
-### Uninstall
-
-Removes every card and the `<style id="mms-styles">` element, disconnects every MutationObserver / IntersectionObserver it created, tears down any fullscreen overlay and body styles, deletes the IndexedDB database, and clears `mms:*` local keys plus `__mmsStats`. Nodes owned by the host (React) are never written to, so nothing needs restoring.
-
----
-
-## Installation
+## Deployment
 
 Requires DSH `>= 0.2.1-rc.2`. Works in the desktop app and the web UI.
 
-The plugin is a two-half bundle: the host half only carries configuration; all UI and rendering live in the browser half.
-
 ### From a source checkout
 
-The repository already contains the build output in `lib/` (`lib/index.js`, `lib/client.js`), so it can be installed as-is. Rebuild after changing `src/`.
+The repo already contains the build output in `lib/`, so it can be installed as-is; rebuild only after changing `src/`.
 
 ```powershell
-# 1) build (optional: lib/ is committed)
+git clone https://github.com/Hankai233/dsh-mermaid-studio.git
+cd dsh-mermaid-studio
+
+# optional: rebuild (needs mermaid@11.17.2 available on this machine)
 $env:DSH_PROFILE_DIR = "$env:USERPROFILE\.dsh\profiles\desktop"
 node scripts/build.mjs
-
-# 2) the build needs an exact mermaid@11.17.2 on this machine:
-#    node_modules / $DSH_PROFILE_DIR/node_modules / $DSH_HOME/profiles/desktop/node_modules
-#    A mismatched version fails loudly instead of silently degrading.
 ```
 
-Register it in the profile, one of two ways:
+Register it in the profile (pick one):
 
-- **With a plugin manager**: `plugin_manager install_bundle`, target set to the absolute path of this directory.
-- **By hand** (no plugin manager): edit `<DSH_HOME>/profiles/desktop/package.json`
-  - add `"dsh-mermaid-studio": "link:<absolute path to this directory>"` to `dependencies`
-  - add `"dsh-mermaid-studio"` to the `dsh.profile.bundles` array
-  - create a link in `node_modules` pointing at this directory (Windows: `New-Item -ItemType Junction`)
-  - fully quit and restart DSH (or reload the page)
+- **Plugin manager**: `plugin_manager install_bundle`, target set to the absolute path of this checkout.
+- **By hand**: edit `<DSH_HOME>/profiles/desktop/package.json`
+  - add `"dsh-mermaid-studio": "link:<absolute path>"` to `dependencies`
+  - add `"dsh-mermaid-studio"` to `dsh.profile.bundles`
+  - create a link in `node_modules` pointing at the checkout (Windows: `New-Item -ItemType Junction`)
+  - fully quit and restart DSH
 
-Two checks after installing:
+After installing: send any mermaid fence — it should render directly; hover it and the six icon buttons appear at the top-right. `window.__mmsStats` in the console shows the counters. If `dsh-mermaid-smooth` is still enabled, disable it first — both plugins insert a card next to the same code block. Rollback steps are in [scripts/rollback.md](scripts/rollback.md).
 
-1. If `dsh-mermaid-smooth` is still enabled, disable it. Both plugins insert a card next to the same code block, which gives you two toolbars.
-2. Send a message with a mermaid fence — it should render directly. Hover the diagram and a row of icons appears at the top-right (zoom in / zoom out / reset / source / export / fullscreen, each with a Chinese tooltip); `window.__mmsStats` in the browser console shows the counters.
+### Let an agent install it
 
-Rollback steps and a troubleshooting table are in [scripts/rollback.md](scripts/rollback.md).
+Paste this into an agent inside DSH and it will clone, build, register and verify:
 
-### npm
+```text
+Install the DSH plugin dsh-mermaid-studio on this machine.
 
-Not published to npm yet. `package.json` already follows the bundle conventions (`dsh.client`, `exports["./client"]`, `cordis.patch.yml`); a published package will ship `lib/`, so consumers will not need to build.
+Repo: https://github.com/Hankai233/dsh-mermaid-studio
 
-### Configuration
+Work in this order and confirm each step before moving on:
+1. Clone the repo somewhere sensible (not inside DSH's own install directory).
+2. Check that lib/index.js and lib/client.js exist and are non-empty.
+   If they are missing, or I ask for a source build, set DSH_PROFILE_DIR and run
+   node scripts/build.mjs (needs mermaid@11.17.2; a version mismatch fails loudly — do not substitute another version).
+3. Open <DSH_HOME>/profiles/desktop/package.json:
+   - add "dsh-mermaid-studio": "link:<absolute path of the clone>" to dependencies
+   - add "dsh-mermaid-studio" to dsh.profile.bundles
+   - create a link in node_modules pointing at the clone (junction on Windows)
+4. If dsh-mermaid-smooth is still listed in dsh.profile.bundles, remove it (its dependency entry can stay).
+5. Restart DSH, then send a mermaid fence and confirm a diagram card appears and
+   that hovering it floats six icon buttons (zoom in / zoom out / reset / source / export / fullscreen).
+6. Report: the absolute paths you changed, the sha256 of the build output, and what you actually saw in step 5.
 
-One key, `cacheEnabled` (default `true`). Put it in the profile's `cordis.patch.yml`:
-
-```yaml
-- id: dsh-mermaid-studio
-  name: dsh-mermaid-studio
-  config:
-    cacheEnabled: true
+Do not modify plugin source, and do not disable DSH security settings to make a check pass.
 ```
 
-Changes take effect after a page reload. If the injected value is missing, the plugin falls back to localStorage; if neither exists it uses the default and records `__mmsStats.configSource` as `default` instead of pretending it read something.
+## Limits
 
----
-
-## Security boundary
-
-The `svg` string comes from IndexedDB and is treated as untrusted input: any same-origin script can write that database, and records live there for 30 days.
-
-- There is one injection exit, `injectSvg()`: parse into a detached document, filter, then `importNode`. Both the fresh-render path and the cache-hit path use it.
-- Parsing is strict XML first. When that fails, a lenient `<template>` HTML parse is used (mermaid emits an unclosed `<br>` inside labels, so the string is not valid XML); the filter is the same either way.
-- Element whitelist (including `foreignObject` and the text-level HTML it may contain), a real attribute whitelist, and declaration-level filtering for inline styles and `<style>`. Stylesheets are rebuilt through CSSOM with `#<renderId>` prefixes; rules that cannot be rewritten are dropped.
-- `href` is limited to `#` fragments and raster `data:image/(png|jpeg|gif|webp)`; `url()` is limited to `#`. Attributes that can trigger a fetch (fills, strokes, filters, masks) are checked by value, not just by name.
-- Any `script`, `iframe`, event attribute or SMIL event element puts the whole fence into the error state and it is never cached.
-- Exported SVGs reuse this already-filtered tree.
-
----
-
-## Known limitations
-
-These are deliberate, not open bugs:
-
-- **The cache is shared across conversations.** Neither the URL nor the chat DOM exposes a session id, so the scope degrades to a constant and the same source in another conversation hits the same record. The upside is that a recurring diagram appears instantly anywhere; the downside is that deleting a conversation does not delete its diagrams — the only exits are TTL expiry, uninstall, or `cacheEnabled=false`.
-- **Each new diagram costs 50–90 ms of synchronous rendering.** mermaid needs a DOM, so it cannot move to a Worker. The serial queue prevents concurrency but cannot split it further.
-- **SVG is the only export format.** PNG/JPG needed a second render plus a canvas encode of up to 27.8 Mpx, which is exactly what made the previous export stall.
-- **Theme only follows.** No manual switch, no per-diagram override.
-- **No source view in fullscreen.** Fullscreen has only the canvas, so the row has no source toggle there. On the card, switching to source view makes the row sit above the code block instead.
-- Smart file names, full keyboard control and a complete focus trap are P1 and not implemented.
-
----
+- **The cache is shared across conversations.** The host exposes no session id, so the scope degrades to a constant and the same source in another conversation hits the same record. Deleting a conversation does not delete its diagrams; the exits are the 30-day expiry, uninstalling, or setting `cacheEnabled` to `false`.
+- **Each new diagram costs 50–90 ms of synchronous rendering.** mermaid needs a DOM, so it cannot move to a Worker.
+- **SVG is the only export.** PNG/JPG needed a second render plus a canvas encode of up to 27.8 Mpx, which is exactly what made export stall, so it was removed.
 
 ## Development
 
 ```powershell
-node scripts/build.mjs               # writes lib/index.js + lib/client.js, prints sha256
-node test/fence.test.mjs             # pure-logic unit tests (no browser needed)
-node qa/harness/run.mjs              # acceptance cases in headless Chromium
-node qa/acceptance.mjs --check       # validate the archive (fields / ids / required assertions / baseline env)
-node qa/harness/run.mjs --headed     # watch it run
+node scripts/build.mjs            # writes lib/, prints sha256 (same input, same output)
+node test/fence.test.mjs          # pure-logic unit tests, no browser needed
+node qa/harness/run.mjs           # acceptance cases in headless Chromium (--headed to watch)
+node qa/acceptance.mjs --check    # validate the archive
 ```
 
-```
-src/host/index.js       host half: carrier plugin + config injection
-src/client/*.js         browser half, 18 chunks concatenated in build order
-scripts/build.mjs       build: wrap mermaid once, concatenate chunks
-scripts/rollback.md     rollback manual
-qa/harness/             acceptance channel (real Chromium against a fake host page)
-qa/acceptance.mjs       archive validation and gate evaluation
-test/                   pure-logic unit tests
-lib/                    build output (committed: installation needs it)
-```
-
-`lib/client.js` is about 3.6 MB, mostly the bundled mermaid engine. The build carries no timestamp, so two builds from the same inputs produce the same sha256.
-
-### Verification status
-
-28 cases: 25 pass, 3 need a human (coexistence with the old plugin, rollback drill, P1 keyboard focus). 11 pure-logic unit tests.
-
-`node qa/acceptance.mjs --gate` still fails: the blocker is the rollback drill, which needs a real plugin disable/enable with timing and cannot be scripted.
-
-### Measurements
-
-On this machine (Chromium 156, 16 cores, DPR 1, no CPU throttling) with a 3693×1880 diagram carrying 30 labels:
-
-| Metric | Value |
-| --- | --- |
-| Page load complete (DCL) | 93–104 ms with **0 long tasks during load** (before removing the idle warm-up: 2 × 180 ms) |
-| First paint | 32–44 ms |
-| Plugin bundle fetched | 3.6 MB / 20–30 ms (local) |
-| First diagram on a cold page, to ready | 302–311 ms (~185 ms engine evaluation + ~97 ms render, two tasks, skeleton visible in between) |
-| Second diagram (engine warm) | 82 ms |
-| Cache key computation | 0.3 ms |
-| SVG export | 1 ms / 39 KB |
-
----
+`src/client/` holds the 18 chunks of the browser half, concatenated in the order `scripts/build.mjs` lists; `lib/client.js` is about 3.6 MB, mostly the bundled mermaid engine.
 
 ## License
 
-Released under **GPL-3.0** (see [LICENSE](LICENSE)).
-
-The bundled mermaid 11.17.2 is MIT-licensed and compatible with GPL-3.0.
+Released under **GPL-3.0**; see [LICENSE](LICENSE).
