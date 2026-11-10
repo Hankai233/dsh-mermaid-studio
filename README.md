@@ -106,9 +106,9 @@ node scripts/build.mjs
 ```powershell
 node scripts/build.mjs            # 产出 lib/，打印 sha256（同输入两次构建结果一致）
 node test/fence.test.mjs          # 纯逻辑单测，不需要浏览器
-node qa/harness/run.mjs           # 无头 Chromium 跑验收用例（--headed 可以看它跑）
-node qa/acceptance.mjs --check    # 校验归档完整性
 ```
+
+验收通道（无头 Chromium 跑的那 28 条用例）不在仓库里，是本机的开发工具；仓库只带 `test/` 里的纯逻辑单测。
 
 `src/client/` 是浏览器半边的 18 个 chunk，按 `scripts/build.mjs` 的顺序拼接；`lib/client.js` 约 3.6 MB，主要是内联的 mermaid 引擎。
 

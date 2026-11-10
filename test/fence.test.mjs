@@ -1,7 +1,7 @@
 /**
  * Unit tests for the pure client modules — the ones that decide *what* gets
  * rendered and *which cache entry* it maps to. DOM-dependent behaviour (SVG
- * injection, canvas export, observers) is covered by qa/harness/run.mjs in a
+ * injection, canvas export, observers) is covered by the local acceptance harness (not shipped) in a
  * real browser instead of a DOM stub that would only test the stub.
  *
  * Each chunk is loaded from its shipped bytes in a fresh VM context, so the

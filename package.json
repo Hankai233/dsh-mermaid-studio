@@ -24,8 +24,7 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test \"test/*.test.mjs\"",
-    "harness": "node qa/harness/run.mjs"
+    "test": "node --test \"test/*.test.mjs\""
   },
   "devDependencies": {
     "mermaid": "11.17.2"

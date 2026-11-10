@@ -106,9 +106,9 @@ Do not modify plugin source, and do not disable DSH security settings to make a 
 ```powershell
 node scripts/build.mjs            # writes lib/, prints sha256 (same input, same output)
 node test/fence.test.mjs          # pure-logic unit tests, no browser needed
-node qa/harness/run.mjs           # acceptance cases in headless Chromium (--headed to watch)
-node qa/acceptance.mjs --check    # validate the archive
 ```
+
+The acceptance channel (the 28 headless-Chromium cases) is not shipped — it is a local development tool; the repo carries the pure-logic tests in `test/`.
 
 `src/client/` holds the 18 chunks of the browser half, concatenated in the order `scripts/build.mjs` lists; `lib/client.js` is about 3.6 MB, mostly the bundled mermaid engine.
 
