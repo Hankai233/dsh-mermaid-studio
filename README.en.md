@@ -110,24 +110,6 @@ npm run build      # writes lib/, prints sha256; same input produces the same ou
 npm test           # pure-logic unit tests (node --test), no browser needed
 ```
 
-### Publishing
-
-Push a version tag; GitHub Actions does the release:
-
-```powershell
-npm version patch                        # or edit version in package.json
-git push && git push origin v0.2.0       # only a tag triggers it
-```
-
-`.github/workflows/npm-publish.yml` runs `npm ci` → build → **verify the committed `lib/` matches that build** → test → `npm publish`. A tag that disagrees with `package.json`'s version fails the job, so 0.1.0 code cannot ship as 0.2.0.
-
-The repo needs an `NPM_TOKEN` secret: the account has 2FA, so it has to be an **Automation** token — a regular one stops at the one-time code prompt.
-
-`files` ships `lib/`, `cordis.patch.yml`, `icon.svg` and the screenshots the README references, so installing the package never requires a build.
-
-The acceptance channel (the 28 headless-Chromium cases) is not shipped — it is a local development tool; the repo carries the pure-logic tests in `test/`.
-
-`src/client/` holds the 18 chunks of the browser half, concatenated in the order `scripts/build.mjs` lists; `lib/client.js` is about 3.6 MB, mostly the bundled mermaid engine.
 
 ## License
 
