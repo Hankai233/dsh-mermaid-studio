@@ -1,15 +1,20 @@
-/* ── card.js — one card per fence: DOM, states, and the toolbar ─────────────
+/* ── card.js — one card per fence: DOM, states, and the floating controls ───
  *
  * Structure (the code block stays exactly where React put it, one sibling
  * after the card; the plugin never writes an attribute, class or style onto a
  * node it does not own):
  *
  *   <div class="mms-card" data-mms-state data-view data-mms-key>
- *     <div class="mms-bar" role="toolbar">…</div>
  *     <div class="mms-vp"><div class="mms-stage">…svg…</div>…skeleton/error…</div>
+ *     <div class="mms-float" role="toolbar">…</div>   ← bottom-right, on hover
  *     <div class="mms-status" aria-live="polite"></div>
  *   </div>
  *   <div class="md-code-block">…</div>
+ *
+ * No persistent toolbar: the control row is invisible until the pointer is over
+ * the diagram (CSS :hover) or focus is inside it, so the diagram itself gets the
+ * whole card. In source view there is no canvas to hover, so CSS turns the row
+ * into a normal row above the code block.
  *
  * Diagram/source is a `data-view` attribute on the card plus two CSS sibling
  * rules — no node is moved, so React's commit never removes a child from a
@@ -18,8 +23,6 @@
 (function (g) {
   'use strict';
   var MMS = g.__MMS__ || (g.__MMS__ = {});
-
-  var VIEW_LABEL = { diagram: '图', code: '源码' };
 
   function el(tag, className, text) {
     var node = g.document.createElement(tag);
@@ -76,37 +79,6 @@
     root.setAttribute('role', 'img');
     root.setAttribute('aria-label', 'Mermaid 图');
 
-    var bar = el('div', 'mms-bar');
-    bar.setAttribute('role', 'toolbar');
-    bar.setAttribute('aria-label', '图表工具');
-    var badge = el('span', 'mms-badge', 'mermaid');
-    var note = el('span', 'mms-note');
-    note.hidden = !state.rejectedDirectives;
-    if (state.rejectedDirectives) note.textContent = '已忽略 init 指令';
-    bar.appendChild(badge);
-    bar.appendChild(note);
-
-    var actions = el('div', 'mms-actions');
-    var viewButton = textButton(VIEW_LABEL.code, '查看源码', function () {
-      setView(state.view === 'diagram' ? 'code' : 'diagram');
-    });
-    // Export is SVG only: the raster path needed a second htmlLabels:false
-    // render plus a 27.8 Mpx canvas encode, which is what made the whole app
-    // stutter. Copy-source was dropped at the same time — the code view already
-    // shows the source and the host renders a copy button for every code block.
-    var exportButton = textButton('导出 SVG', '导出为 SVG 文件', function () {
-      doExportSvg();
-    });
-
-    var fullscreenButton = iconButton('⛶', '全屏查看', function () {
-      app.openViewer(card);
-    });
-
-    actions.appendChild(viewButton);
-    actions.appendChild(exportButton);
-    actions.appendChild(fullscreenButton);
-    bar.appendChild(actions);
-
     var viewport = el('div', 'mms-vp');
     viewport.tabIndex = 0;
     viewport.setAttribute('role', 'application');
@@ -139,11 +111,52 @@
     viewport.appendChild(skeleton);
     viewport.appendChild(errorBox);
 
+    // Floating controls: no persistent toolbar. The row appears when the pointer
+    // is over the diagram (CSS :hover) or when keyboard focus is inside it, and
+    // sits bottom-right over the canvas. In source view there is no canvas to
+    // hover, so the row becomes a normal row above the code block.
+    var floatBar = el('div', 'mms-float');
+    floatBar.setAttribute('role', 'toolbar');
+    floatBar.setAttribute('aria-label', '图表工具');
+    if (state.rejectedDirectives) {
+      var note = el('span', 'mms-float-note', '已忽略 init 指令');
+      note.title = '源码里的 init 指令包含被禁止的配置键，已从源码中剥离';
+      floatBar.appendChild(note);
+    }
+    var zoomInButton = textButton('+', '放大', function () {
+      controller.zoomBy(1.25);
+    });
+    var zoomOutButton = textButton('−', '缩小', function () {
+      controller.zoomBy(1 / 1.25);
+    });
+    var resetZoomButton = textButton('重置', '重置缩放（回到适应宽度）', function () {
+      controller.fitWidth();
+    });
+    var viewButton = textButton('</>', '显示源代码', function () {
+      setView(state.view === 'diagram' ? 'code' : 'diagram');
+    });
+    // Export is SVG only: the raster path needed a second htmlLabels:false
+    // render plus a 27.8 Mpx canvas encode, which is what made the whole app
+    // stutter.
+    var exportButton = textButton('导出 SVG', '导出为 SVG 文件', function () {
+      doExportSvg();
+    });
+    var fullscreenButton = iconButton('⛶', '全屏查看', function () {
+      app.openViewer(card);
+    });
+
+    floatBar.appendChild(zoomInButton);
+    floatBar.appendChild(zoomOutButton);
+    floatBar.appendChild(resetZoomButton);
+    floatBar.appendChild(viewButton);
+    floatBar.appendChild(exportButton);
+    floatBar.appendChild(fullscreenButton);
+
     var status = el('div', 'mms-status');
     status.setAttribute('aria-live', 'polite');
 
-    root.appendChild(bar);
     root.appendChild(viewport);
+    root.appendChild(floatBar);
     root.appendChild(status);
 
     var controller = MMS.createViewport({
@@ -171,8 +184,10 @@
     function setView(view) {
       state.view = view === 'code' ? 'code' : 'diagram';
       root.setAttribute('data-view', state.view);
-      viewButton.textContent = state.view === 'diagram' ? VIEW_LABEL.code : VIEW_LABEL.diagram;
       viewButton.setAttribute('aria-pressed', state.view === 'code' ? 'true' : 'false');
+      var viewTitle = state.view === 'code' ? '显示图表' : '显示源代码';
+      viewButton.title = viewTitle;
+      viewButton.setAttribute('aria-label', viewTitle);
       MMS.writeLs(MMS.CONFIG.LS_VIEW_PREFIX + key.slice(0, 12), state.view);
       if (state.view === 'diagram' && state.phase === 'ready') {
         requestAnimationFrame(function () {

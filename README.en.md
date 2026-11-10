@@ -40,6 +40,7 @@ The engine is mermaid 11.17.2, bundled into the plugin. No network access.
 
 ### Interaction
 
+- No persistent toolbar: hovering the diagram floats a row of six buttons at the bottom-right (`+` zoom in · `−` zoom out · reset · `</>` diagram/source · export SVG · `⛶` fullscreen); it hides again when the pointer leaves, and appears on keyboard focus too.
 - Ctrl/⌘ + wheel zooms around the pointer; a plain wheel still scrolls the page.
 - Drag to pan, with moves coalesced per frame (20 consecutive `pointermove` events result in 1 style write). Double-click toggles between "fit page" and 100%.
 - The zoom ceiling is derived from the diagram's actual size (`LAYER_MAX_PX = 8192`) so the composited layer stays inside the GPU texture budget.
@@ -104,7 +105,7 @@ Register it in the profile, one of two ways:
 Two checks after installing:
 
 1. If `dsh-mermaid-smooth` is still enabled, disable it. Both plugins insert a card next to the same code block, which gives you two toolbars.
-2. Send a message with a mermaid fence — a card should appear. The toolbar reads `源码` (source) · `导出 SVG` (export SVG) · `⛶`; `window.__mmsStats` in the browser console shows the counters.
+2. Send a message with a mermaid fence — it should render directly. Hover the diagram and a row appears at the bottom-right: `+` `−` `重置` (reset) `</>` `导出 SVG` (export) `⛶`; `window.__mmsStats` in the browser console shows the counters.
 
 Rollback steps and a troubleshooting table are in [scripts/rollback.md](scripts/rollback.md).
 
@@ -148,6 +149,7 @@ These are deliberate, not open bugs:
 - **Each new diagram costs 50–90 ms of synchronous rendering.** mermaid needs a DOM, so it cannot move to a Worker. The serial queue prevents concurrency but cannot split it further.
 - **SVG is the only export format.** PNG/JPG needed a second render plus a canvas encode of up to 27.8 Mpx, which is exactly what made the previous export stall.
 - **Theme only follows.** No manual switch, no per-diagram override.
+- **Source view has no canvas to hover.** There the same row sits above the code block instead; the fullscreen overlay keeps its own bar (with a zoom readout and a close button).
 - Smart file names, full keyboard control and a complete focus trap are P1 and not implemented.
 
 ---

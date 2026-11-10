@@ -162,9 +162,10 @@ test('1', async (page) => {
     out.push(window.__A('通用标签（代码块）+ mermaid 首行 → 成图', true, !!(genericLabel.previousElementSibling && genericLabel.previousElementSibling.classList.contains('mms-card'))));
     out.push(window.__A('通用标签 + 非 mermaid 首行 → 不成图', false, !!(genericPython.previousElementSibling && genericPython.previousElementSibling.classList.contains('mms-card'))));
     out.push(window.__A('卡片紧邻代码块（不移动 React 节点）', true, cards.every((c) => c.nextIsBlock)));
-    const toolbarText = Array.from(document.querySelectorAll('.mms-bar button')).map((b) => b.textContent.trim());
-    out.push(window.__A('工具栏无主题切换（只跟随宿主）', false, toolbarText.some((t) => t.indexOf('主题') === 0)));
-    out.push(window.__A('工具栏无复制按钮', false, toolbarText.indexOf('复制') >= 0));
+    const firstCard = document.querySelector('.mms-card');
+    const toolbarText = Array.from(firstCard.querySelectorAll('.mms-float button')).map((b) => b.textContent.trim());
+    out.push(window.__A('悬浮按钮顺序：+ − 重置 </> 导出 SVG ⛶', '+|−|重置|</>|导出 SVG|⛶', toolbarText.join('|')));
+    out.push(window.__A('没有常驻工具栏', null, document.querySelector('.mms-bar')));
     out.push(window.__A('渲染计数 >= 3', true, (window.__stats().renderCount || 0) >= 3, (window.__stats().renderCount || 0) >= 3));
     // P0-10: five identical fences share one cache key but must each get a card.
     const same = [];
@@ -308,6 +309,63 @@ test('4', async (page) => {
     out.push(window.__A('0 尺寸容器不产生 NaN', true, isFinite(afterResize.s) && afterResize.s > 0, isFinite(afterResize.s) && afterResize.s > 0));
     return out;
   });
+});
+
+/* ── 4b: floating row visibility and zoom buttons (real mouse) ───────────── */
+test('4b', async (page) => {
+  const out = [];
+  await page.mouse.move(2, 2);
+  await page.waitForTimeout(200);
+  const hidden = await page.evaluate(() => getComputedStyle(document.querySelector('.mms-float')).opacity);
+  out.push({ name: '指针不在图上时悬浮按钮隐藏', expected: '0', actual: hidden, pass: hidden === '0' });
+
+  await page.hover('.mms-card');
+  await page.waitForTimeout(200);
+  const shown = await page.evaluate(() => getComputedStyle(document.querySelector('.mms-float')).opacity);
+  out.push({ name: '指针在图上时悬浮按钮可见', expected: '1', actual: shown, pass: shown === '1' });
+
+  const zoom = await page.evaluate(async () => {
+    const card = document.querySelector('.mms-card');
+    const stage = card.querySelector('.mms-stage');
+    const read = () => {
+      const m = /translate(?:3d)?\(([-\d.]+)px,\s*([-\d.]+)px(?:,\s*0px)?\)\s*scale\(([\d.]+)\)/.exec(stage.style.transform);
+      return m ? +m[3] : null;
+    };
+    const click = (label) => {
+      const button = Array.from(card.querySelectorAll('.mms-float button')).find((b) => b.textContent.trim() === label);
+      button.click();
+    };
+    const fit = read();
+    click('+');
+    const afterPlus = read();
+    click('−');
+    click('−');
+    const afterMinus = read();
+    click('重置');
+    const afterReset = read();
+    return { fit, afterPlus, afterMinus, afterReset };
+  });
+  out.push({ name: '+ 放大', expected: '倍数变大', actual: zoom.afterPlus, pass: zoom.afterPlus > zoom.fit });
+  out.push({ name: '− 缩小', expected: '倍数变小', actual: zoom.afterMinus, pass: zoom.afterMinus < zoom.fit });
+  out.push({ name: '重置回到适应宽度', expected: zoom.fit, actual: zoom.afterReset, pass: Math.abs(zoom.afterReset - zoom.fit) < 0.01 });
+
+  // </> toggles the source view and the row stays reachable
+  const view = await page.evaluate(async () => {
+    const card = document.querySelector('.mms-card');
+    const button = Array.from(card.querySelectorAll('.mms-float button')).find((b) => b.textContent.trim() === '</>');
+    button.click();
+    await new Promise((r) => setTimeout(r, 120));
+    const codeView = card.getAttribute('data-view');
+    const blockVisible = getComputedStyle(card.nextElementSibling).display !== 'none';
+    const rowOpacity = getComputedStyle(card.querySelector('.mms-float')).opacity;
+    button.click();
+    await new Promise((r) => setTimeout(r, 120));
+    return { codeView, blockVisible, rowOpacity, back: card.getAttribute('data-view') };
+  });
+  out.push({ name: '</> 切到源码视图并露出代码块', 'source+block': 'source+true', actual: view.codeView + '+' + view.blockVisible, pass: view.codeView === 'code' && view.blockVisible });
+  out.push({ name: '源码视图下按钮行仍然可见（不依赖悬停）', expected: '1', actual: view.rowOpacity, pass: view.rowOpacity === '1' });
+  out.push({ name: '</> 再点回到图表视图', expected: 'diagram', actual: view.back, pass: view.back === 'diagram' });
+  return out;
 });
 
 /* ── 5: fullscreen overlay ───────────────────────────────────────────────── */
@@ -882,8 +940,8 @@ test('8', async (page) => {
   return page.evaluate(async () => {
     const out = [];
     const card = document.querySelector('.mms-card');
-    const toolbar = Array.from(card.querySelectorAll('.mms-bar button')).map((b) => b.textContent.trim());
-    out.push(window.__A('工具栏没有主题开关', false, toolbar.some((t) => t.indexOf('主题') === 0)));
+    const toolbar = Array.from(card.querySelectorAll('.mms-float button')).map((b) => b.textContent.trim());
+    out.push(window.__A('悬浮按钮里没有主题开关', false, toolbar.some((t) => t.indexOf('主题') === 0)));
 
     const before = window.__stats();
     const hitsBefore = before.cacheHitL1 + before.cacheHitL2;
