@@ -21,7 +21,7 @@ The engine is mermaid 11.17.2, bundled into the plugin. No network access.
 
 - One serial queue, concurrency 1. mermaid's `initialize()` is global configuration; concurrent renders bleed themes into each other.
 - A 15 s timeout changes the card state but does not free the queue slot. If a render never settles (2× timeout), the current engine instance is abandoned and a fresh one continues; the event is counted as `renderIsolated`. Two consecutive timeouts open a breaker and the card offers "reset renderer".
-- The engine is warmed in an idle window after the first paint. The cache key reads the version injected at build time, so computing a key never evaluates the 3.5 MB bundle.
+- The cache key reads the version injected at build time, so computing a key never evaluates the 3.5 MB bundle. The engine is evaluated only when a diagram actually needs it, split from the render into two tasks with the skeleton painted in between.
 - Lazy rendering: a fence shows a skeleton until it enters the viewport.
 
 ### Cache
@@ -187,10 +187,9 @@ On this machine (Chromium 156, 16 cores, DPR 1, no CPU throttling) with a 3693×
 
 | Metric | Value |
 | --- | --- |
-| First diagram on a cold page, to ready | 115 ms (319 ms before the fix) |
-| Longest single task | 97 ms (296 ms before) |
+| Page load complete | 93 ms with **0 long tasks during load** (before removing the idle warm-up: 2 × 180 ms) |
+| First diagram on a cold page, to ready | 302 ms (185 ms engine evaluation + 97 ms render, two tasks, skeleton visible in between) |
 | Second diagram (engine warm) | 82 ms |
-| Engine evaluation (once per page) | ~190 ms, moved into an idle window |
 | Cache key computation | 0.3 ms |
 | SVG export | 1 ms / 39 KB |
 

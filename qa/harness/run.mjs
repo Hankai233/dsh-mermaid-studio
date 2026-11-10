@@ -62,7 +62,11 @@ function startServer() {
         res.writeHead(403).end('forbidden');
         return;
       }
-      const body = await readFile(file);
+      let body = await readFile(file);
+      // ?noplugin=1: measure the page without the plugin bundle.
+      if (url.searchParams.get('noplugin') === '1' && file.endsWith('shell.html')) {
+        body = Buffer.from(String(body).replace('<script src="/lib/client.js"></script>', ''), 'utf8');
+      }
       res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
       res.end(body);
     } catch (error) {
@@ -118,6 +122,12 @@ const PAGE_HELPERS = `
     return Array.from(document.querySelectorAll('.mms-card')).filter((c) => c.getAttribute('data-mms-state') === 'ready').length;
   };
   window.__collectConsole = window.__collectConsole || [];
+  window.__loadLongTasks = window.__loadLongTasks || [];
+  try {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) window.__loadLongTasks.push(Math.round(entry.duration));
+    }).observe({ entryTypes: ['longtask'], buffered: true });
+  } catch (error) { /* older engine */ }
 `;
 
 const TESTS = [];
@@ -978,7 +988,8 @@ test('24', async () => ({ assertions: [], note: 'P1 项：Tab 焦点循环需真
 // ── runner ────────────────────────────────────────────────────────────────
 async function main() {
   const { server, port } = await startServer();
-  const url = `http://127.0.0.1:${port}/qa/harness/shell.html`;
+  const suffixArg = ARGV.find((a) => a.startsWith('--suffix='));
+  const url = `http://127.0.0.1:${port}/qa/harness/shell.html` + (suffixArg ? suffixArg.slice('--suffix='.length) : '');
   const userDataDir = path.join(os.tmpdir(), 'mms-harness-' + process.pid);
   await rm(userDataDir, { recursive: true, force: true });
 
@@ -1003,7 +1014,8 @@ async function main() {
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.evaluate(PAGE_HELPERS);
   const booted = await page.evaluate(() => window.__boot());
-  if (booted !== 'ok') {
+  const loadAb = ARGV.some((a) => a.indexOf('noplugin=1') >= 0);
+  if (booted !== 'ok' && !loadAb) {
     const loadError = await page.evaluate(() => window.__loadError || '');
     console.error('[harness] bundle failed to boot:', booted, loadError);
     await context.close();

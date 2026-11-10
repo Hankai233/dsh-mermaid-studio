@@ -204,26 +204,6 @@
       }
     });
 
-    function scheduleWarmup() {
-      var run = function () {
-        try {
-          renderer.warm();
-        } catch (error) {
-          /* warm-up is best effort; the first render will retry */
-        }
-      };
-      var idle = g.requestIdleCallback;
-      var raf = g.requestAnimationFrame || function (fn) {
-        return setTimeout(fn, 16);
-      };
-      // After the chat's first paint, during the first idle window: paying the
-      // engine cost here is invisible, paying it while a diagram waits is not.
-      raf(function () {
-        if (typeof idle === 'function') idle(run, { timeout: 500 });
-        else setTimeout(run, 0);
-      });
-    }
-
     return {
       app: app,
       start: function () {
@@ -238,10 +218,6 @@
         });
         stats.publish();
         printStats();
-
-        // Move the one-time engine evaluation off the first diagram's critical
-        // path: by the time the user scrolls to a fence it is usually warm.
-        scheduleWarmup();
         if (MMS.CONFIG.AUDIT && typeof MMS.downloadAudit === 'function') {
           setTimeout(function () {
             try {
