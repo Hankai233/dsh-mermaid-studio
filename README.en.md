@@ -53,9 +53,10 @@ The repo already contains the build output in `lib/`, so it can be installed as-
 git clone https://github.com/Hankai233/dsh-mermaid-studio.git
 cd dsh-mermaid-studio
 
-# optional: rebuild (needs mermaid@11.17.2 available on this machine)
+# optional: rebuild (npm install brings in mermaid@11.17.2 for the build)
+npm install
 $env:DSH_PROFILE_DIR = "$env:USERPROFILE\.dsh\profiles\desktop"
-node scripts/build.mjs
+npm run build
 ```
 
 Register it in the profile (pick one):
@@ -104,9 +105,12 @@ Do not modify plugin source, and do not disable DSH security settings to make a 
 ## Development
 
 ```powershell
-node scripts/build.mjs            # writes lib/, prints sha256 (same input, same output)
-node test/fence.test.mjs          # pure-logic unit tests, no browser needed
+npm install        # pulls mermaid@11.17.2 (a devDependency) for the build
+npm run build      # writes lib/, prints sha256; same input produces the same output
+npm test           # pure-logic unit tests (node --test), no browser needed
 ```
+
+Publishing: `npm publish` (the account has 2FA on, so it asks for a one-time code). `files` ships `lib/`, `cordis.patch.yml`, `icon.svg` and the screenshots the README references, so installing the package never requires a build.
 
 The acceptance channel (the 28 headless-Chromium cases) is not shipped — it is a local development tool; the repo carries the pure-logic tests in `test/`.
 

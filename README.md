@@ -53,9 +53,10 @@ DeepSeek Harness 插件：**对话里的 mermaid 围栏直接渲染成图**。�
 git clone https://github.com/Hankai233/dsh-mermaid-studio.git
 cd dsh-mermaid-studio
 
-# 可选：重新构建（需要本机能找到 mermaid@11.17.2）
+# 可选：重新构建（npm install 会装上构建用的 mermaid@11.17.2）
+npm install
 $env:DSH_PROFILE_DIR = "$env:USERPROFILE\.dsh\profiles\desktop"
-node scripts/build.mjs
+npm run build
 ```
 
 把插件注册到 profile（两种方式选一）：
@@ -104,11 +105,14 @@ node scripts/build.mjs
 ## 开发
 
 ```powershell
-node scripts/build.mjs            # 产出 lib/，打印 sha256（同输入两次构建结果一致）
-node test/fence.test.mjs          # 纯逻辑单测，不需要浏览器
+npm install        # 装构建用的 mermaid@11.17.2（devDependency）
+npm run build      # 产出 lib/，打印 sha256；同样的输入两次构建结果一致
+npm test           # 纯逻辑单测（node --test），不需要浏览器
 ```
 
-验收通道（无头 Chromium 跑的那 28 条用例）不在仓库里，是本机的开发工具；仓库只带 `test/` 里的纯逻辑单测。
+发布：`npm publish`（账号开了 2FA，会要求一次性验证码）。`files` 里带上了 `lib/`、`cordis.patch.yml`、`icon.svg` 和 README 引用的截图，所以装包的人不需要自己构建。
+
+验收通道（那 28 条无头 Chromium 用例）不在仓库里，是本机的开发工具；仓库只带 `test/` 里的纯逻辑单测。
 
 `src/client/` 是浏览器半边的 18 个 chunk，按 `scripts/build.mjs` 的顺序拼接；`lib/client.js` 约 3.6 MB，主要是内联的 mermaid 引擎。
 
