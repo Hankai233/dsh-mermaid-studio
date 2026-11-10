@@ -324,6 +324,22 @@ test('4b', async (page) => {
   const shown = await page.evaluate(() => getComputedStyle(document.querySelector('.mms-float')).opacity);
   out.push({ name: '指针在图上时悬浮按钮可见', expected: '1', actual: shown, pass: shown === '1' });
 
+  // placement: the row floats over the TOP of the diagram (so switching to source
+  // view, where the same row sits above the code block, keeps it in one place)
+  const place = await page.evaluate(() => {
+    const card = document.querySelector('.mms-card');
+    const row = card.querySelector('.mms-float');
+    const c = card.getBoundingClientRect();
+    const r = row.getBoundingClientRect();
+    return {
+      gapTop: Math.round(r.top - c.top),
+      gapBottom: Math.round(c.bottom - r.bottom),
+      gapRight: Math.round(c.right - r.right)
+    };
+  });
+  out.push({ name: '悬浮行贴在图表上侧', expected: 'gapTop < 40 且 下方留白更大', actual: JSON.stringify(place), pass: place.gapTop >= 0 && place.gapTop < 40 && place.gapBottom > place.gapTop });
+  out.push({ name: '悬浮行右对齐', expected: 'gapRight < 16', actual: place.gapRight, pass: place.gapRight >= 0 && place.gapRight < 16 });
+
   const zoom = await page.evaluate(async () => {
     const card = document.querySelector('.mms-card');
     const stage = card.querySelector('.mms-stage');
