@@ -41,6 +41,14 @@
     }
 
     function onKeyDown(event) {
+      if (event.key === 'Escape' && overlay && event.target === overlay.querySelector('.mms-float-scale')) {
+        var input = event.target;
+        input.value = Math.round((controller ? controller.state().s : 1) * 100) + '%';
+        input.blur();
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         close();
@@ -127,9 +135,14 @@
       bar.className = 'mms-float';
       bar.setAttribute('role', 'toolbar');
       bar.setAttribute('aria-label', '全屏图表工具');
-      var scaleLabel = doc.createElement('span');
-      scaleLabel.className = 'mms-float-scale';
-      scaleLabel.textContent = '100%';
+      var currentScale = 1;
+      var scaleInput = doc.createElement('input');
+      scaleInput.type = 'text';
+      scaleInput.className = 'mms-float-scale';
+      scaleInput.setAttribute('inputmode', 'decimal');
+      scaleInput.setAttribute('aria-label', '缩放百分比，可直接输入');
+      scaleInput.title = '输入百分比后回车应用';
+      scaleInput.value = '100%';
 
       var viewport = doc.createElement('div');
       viewport.className = 'mms-vp';
@@ -142,10 +155,47 @@
       stage.appendChild(svg);
       viewport.appendChild(stage);
 
-      bar.appendChild(scaleLabel);
+      function showScale(scale) {
+        currentScale = scale;
+        if (g.document.activeElement !== scaleInput) scaleInput.value = Math.round(scale * 100) + '%';
+      }
+
+      function restoreScale() {
+        scaleInput.value = Math.round(currentScale * 100) + '%';
+      }
+
+      /** Typed value wins; anything unparsable just snaps back to the real scale. */
+      function commitScale() {
+        var digits = String(scaleInput.value).replace(/[^0-9.]/g, '');
+        var percent = parseFloat(digits);
+        if (!isFinite(percent) || percent <= 0 || !controller) {
+          restoreScale();
+          return;
+        }
+        var applied = controller.zoomTo(percent / 100);
+        showScale(applied);
+        scaleInput.value = Math.round(applied * 100) + '%';
+      }
+
+      scaleInput.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          commitScale();
+        }
+      });
+      scaleInput.addEventListener('blur', function () {
+        commitScale();
+      });
+
       bar.appendChild(control('zoomIn', '放大', function () { controller && controller.zoomBy(1.25); }));
+      bar.appendChild(scaleInput);
       bar.appendChild(control('zoomOut', '缩小', function () { controller && controller.zoomBy(1 / 1.25); }));
-      bar.appendChild(control('reset', '重置缩放（适应全图）', function () { controller && controller.fitPage(); }));
+      bar.appendChild(control('reset', '重置缩放（回到 100%）', function () {
+        if (!controller) return;
+        controller.reset100();
+        showScale(controller.state().s);
+        scaleInput.value = '100%';
+      }));
       bar.appendChild(
         control('download', '导出为 SVG 文件', function () {
           if (!card.getSvg()) return;
@@ -165,9 +215,7 @@
         viewport: viewport,
         stage: stage,
         alwaysZoom: true,
-        onScale: function (scale) {
-          scaleLabel.textContent = Math.round(scale * 100) + '%';
-        }
+        onScale: showScale
       });
       controller.fitPage();
 

@@ -409,7 +409,8 @@ test('5', async (page) => {
     out.push(window.__A('全屏里也是悬浮按钮行', true, !!row, !!row));
     out.push(window.__A('全屏没有旧的文字工具条', null, overlay.querySelector('.mms-bar')));
     const rowButtons = Array.from(row.querySelectorAll('button'));
-    out.push(window.__A('全屏按钮顺序（图标）', '放大|缩小|重置缩放（适应全图）|导出为 SVG 文件|退出全屏（Esc）', rowButtons.map((b) => b.getAttribute('aria-label')).join('|')));
+    out.push(window.__A('全屏控件顺序（放大 · 百分比 · 缩小 · 重置 · 导出 · 退出）', 'button:放大|input:缩放百分比，可直接输入|button:缩小|button:重置缩放（回到 100%）|button:导出为 SVG 文件|button:退出全屏（Esc）', Array.from(row.children).map((n) => n.tagName.toLowerCase() + ':' + (n.getAttribute('aria-label') || '')).join('|')));
+    out.push(window.__A('缩放值是输入框而不是纯文本', 'INPUT', (row.querySelector('.mms-float-scale') || {}).tagName));
     out.push(window.__A('全屏按钮都是 SVG 图标、没有文字', rowButtons.length + '/' + rowButtons.length, rowButtons.filter((b) => b.querySelector('svg') && !b.textContent.trim()).length + '/' + rowButtons.length));
     out.push(window.__A('全屏图标与卡片同一套规格', '5', String(rowButtons.filter((b) => {
       const svg = b.querySelector('svg');
@@ -460,7 +461,7 @@ test('5b', async (page) => {
 
   const zoom = await page.evaluate(async () => {
     const row = document.querySelector('[data-mms-overlay] .mms-float');
-    const read = () => (row.querySelector('.mms-float-scale') || {}).textContent;
+    const read = () => (row.querySelector('.mms-float-scale') || {}).value;
     const before = read();
     Array.from(row.querySelectorAll('button')).find((b) => b.getAttribute('aria-label') === '放大').click();
     await new Promise((r) => setTimeout(r, 120));
@@ -475,7 +476,33 @@ test('5b', async (page) => {
   });
   out.push({ name: '全屏放大按钮生效', expected: '百分比变大', actual: zoom.afterPlus, pass: parseInt(zoom.afterPlus, 10) > parseInt(zoom.before, 10) });
   out.push({ name: '全屏缩小按钮生效', expected: '百分比变小', actual: zoom.afterMinus, pass: parseInt(zoom.afterMinus, 10) < parseInt(zoom.before, 10) });
-  out.push({ name: '全屏重置回到适应全图', expected: zoom.before, actual: zoom.afterReset, pass: Math.abs(parseInt(zoom.afterReset, 10) - parseInt(zoom.before, 10)) <= 1 });
+  out.push({ name: '全屏重置回到 100%', expected: '100%', actual: zoom.afterReset, pass: zoom.afterReset === '100%' });
+
+  // typing a percentage applies it; a nonsense value snaps back
+  const typed = await page.evaluate(async () => {
+    const row = document.querySelector('[data-mms-overlay] .mms-float');
+    const input = row.querySelector('.mms-float-scale');
+    const stage = document.querySelector('[data-mms-overlay] .mms-stage');
+    const scaleOf = () => {
+      const m = /scale\(([\d.]+)\)/.exec(stage.style.transform || '');
+      return m ? Math.round(+m[1] * 100) : null;
+    };
+    const type = (text) => {
+      input.focus();
+      input.value = text;
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    };
+    type('150');
+    await new Promise((r) => setTimeout(r, 150));
+    const afterTyped = { value: input.value, scale: scaleOf() };
+    type('abc');
+    input.blur();
+    await new Promise((r) => setTimeout(r, 150));
+    const afterBad = { value: input.value, scale: scaleOf() };
+    return { afterTyped, afterBad };
+  });
+  out.push({ name: '输入百分比回车即生效', expected: '150%', actual: typed.afterTyped.value, pass: typed.afterTyped.value === '150%' && typed.afterTyped.scale === 150 });
+  out.push({ name: '输入非数字时回到真实缩放', expected: '150%', actual: typed.afterBad.value, pass: typed.afterBad.value === '150%' && typed.afterBad.scale === 150 });
 
   await page.keyboard.press('Escape');
   await page.waitForTimeout(200);

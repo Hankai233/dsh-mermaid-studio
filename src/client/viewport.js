@@ -192,6 +192,14 @@
       zoomAt(view.w / 2, view.h / 2, factor);
     }
 
+    /** Zoom to an absolute scale; returns the scale actually applied. */
+    function zoomTo(scale) {
+      if (!isFinite(scale) || scale <= 0) return state.s;
+      var view = viewSize();
+      zoomAt(view.w / 2, view.h / 2, clampScale(scale) / state.s);
+      return state.s;
+    }
+
     function reset100() {
       var view = viewSize();
       var content = contentSize();
@@ -302,6 +310,7 @@
       fitPage: fitPage,
       reset100: reset100,
       zoomBy: zoomCentered,
+      zoomTo: zoomTo,
       zoomAt: zoomAt,
       refit: function () {
         fit(state.mode === 'custom' ? 'page' : state.mode);

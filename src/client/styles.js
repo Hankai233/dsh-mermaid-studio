@@ -72,7 +72,9 @@
     '[data-mms-overlay] .mms-vp{flex:1;height:auto;cursor:grab}',
     '[data-mms-overlay] .mms-float{right:16px;top:16px}',
     '[data-mms-overlay][data-row="on"] .mms-float,[data-mms-overlay] .mms-float:focus-within{opacity:1;transform:none;pointer-events:auto}',
-    '.mms-float-scale{font:var(--dsw-font-xxxs-11,11px/1.4 ui-monospace,monospace);color:var(--mms-label-2);padding:0 8px 0 4px;font-variant-numeric:tabular-nums}',
+    '.mms-float-scale{box-sizing:border-box;width:52px;height:24px;padding:0 4px;border:1px solid transparent;border-radius:6px;background:transparent;font:var(--dsw-font-xxxs-11,11px/1.4 ui-monospace,monospace);color:var(--mms-label-2);text-align:center;font-variant-numeric:tabular-nums;appearance:none}',
+    '.mms-float-scale:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.16))}',
+    '.mms-float-scale:focus{outline:none;border-color:var(--mms-accent);color:var(--mms-label);background:transparent}',
 
     /* hide the host code block only, never restyle it */
     '.mms-card[data-view="diagram"] + .md-code-block{display:none}',
