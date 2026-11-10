@@ -2,6 +2,9 @@
 # plain Cordis plugin). The package.json `dsh.client` declaration makes the
 # web app load ./client as the browser half, which is where every feature
 # lives — the host half only carries config.
+#
+# The row name MUST equal the package name: the client-modules node half
+# resolves require.resolve('<row-name>/package.json') to find the package.
 - insert:
     - id: dsh-mermaid-studio
-      name: dsh-mermaid-studio
+      name: '@hankai233/dsh-mermaid-studio'

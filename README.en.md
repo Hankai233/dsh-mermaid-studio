@@ -63,8 +63,8 @@ Register it in the profile (pick one):
 
 - **Plugin manager**: `plugin_manager install_bundle`, target set to the absolute path of this checkout.
 - **By hand**: edit `<DSH_HOME>/profiles/desktop/package.json`
-  - add `"dsh-mermaid-studio": "link:<absolute path>"` to `dependencies`
-  - add `"dsh-mermaid-studio"` to `dsh.profile.bundles`
+  - add `"@hankai233/dsh-mermaid-studio": "link:<absolute path>"` to `dependencies`
+  - add `"@hankai233/dsh-mermaid-studio"` to `dsh.profile.bundles`
   - create a link in `node_modules` pointing at the checkout (Windows: `New-Item -ItemType Junction`)
   - fully quit and restart DSH
 
@@ -75,7 +75,7 @@ After installing: send any mermaid fence — it should render directly; hover it
 Paste this into an agent inside DSH and it will clone, build, register and verify:
 
 ```text
-Install the DSH plugin dsh-mermaid-studio on this machine.
+Install the DSH plugin @hankai233/dsh-mermaid-studio on this machine.
 
 Repo: https://github.com/Hankai233/dsh-mermaid-studio
 
@@ -85,8 +85,8 @@ Work in this order and confirm each step before moving on:
    If they are missing, or I ask for a source build, set DSH_PROFILE_DIR and run
    node scripts/build.mjs (needs mermaid@11.17.2; a version mismatch fails loudly — do not substitute another version).
 3. Open <DSH_HOME>/profiles/desktop/package.json:
-   - add "dsh-mermaid-studio": "link:<absolute path of the clone>" to dependencies
-   - add "dsh-mermaid-studio" to dsh.profile.bundles
+   - add "@hankai233/dsh-mermaid-studio": "link:<absolute path of the clone>" to dependencies
+   - add "@hankai233/dsh-mermaid-studio" to dsh.profile.bundles
    - create a link in node_modules pointing at the clone (junction on Windows)
 4. If dsh-mermaid-smooth is still listed in dsh.profile.bundles, remove it (its dependency entry can stay).
 5. Restart DSH, then send a mermaid fence and confirm a diagram card appears and

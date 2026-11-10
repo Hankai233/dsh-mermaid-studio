@@ -137,7 +137,7 @@ async function build() {
   }
 
   const banner = [
-    '/*! dsh-mermaid-studio — browser half.',
+    '/*! @hankai233/dsh-mermaid-studio — browser half.',
     ' *  Built from src/client/*.js; do not edit lib/client.js by hand.',
     ` *  mermaid ${pinned} · sanitizer v1 · chunks: ${chunkHashes.join(' ')}`,
     ' */'

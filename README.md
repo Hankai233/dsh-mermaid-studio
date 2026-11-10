@@ -63,8 +63,8 @@ npm run build
 
 - **插件管理器**：`plugin_manager install_bundle`，target 指到这个目录的绝对路径。
 - **手工**：编辑 `<DSH_HOME>/profiles/desktop/package.json`
-  - `dependencies` 加 `"dsh-mermaid-studio": "link:<仓库绝对路径>"`
-  - `dsh.profile.bundles` 数组加 `"dsh-mermaid-studio"`
+  - `dependencies` 加 `"@hankai233/dsh-mermaid-studio": "link:<仓库绝对路径>"`
+  - `dsh.profile.bundles` 数组加 `"@hankai233/dsh-mermaid-studio"`
   - 在 `node_modules` 里建一个指向仓库目录的链接（Windows：`New-Item -ItemType Junction`）
   - 完全退出并重启 DSH
 
@@ -75,7 +75,7 @@ npm run build
 把下面这段整段发给 DSH 里的 Agent，它会自己克隆、构建、注册并验证：
 
 ```text
-帮我在这台机器上安装 DSH 插件 dsh-mermaid-studio。
+帮我在这台机器上安装 DSH 插件 @hankai233/dsh-mermaid-studio。
 
 仓库：https://github.com/Hankai233/dsh-mermaid-studio
 
@@ -85,7 +85,7 @@ npm run build
    如果缺失，或者我要求从源码构建，就设置 DSH_PROFILE_DIR 后运行
    node scripts/build.mjs（需要 mermaid@11.17.2；版本不符会直接报错，别改成别的版本）。
 3. 打开 <DSH_HOME>/profiles/desktop/package.json：
-   - dependencies 里加 "dsh-mermaid-studio": "link:<克隆目录的绝对路径>"
+   - dependencies 里加 "@hankai233/dsh-mermaid-studio": "link:<克隆目录的绝对路径>"
    - dsh.profile.bundles 里加 "dsh-mermaid-studio"
    - 在 node_modules 下建一个指向克隆目录的链接（Windows 用 junction）
 4. 如果 dsh-mermaid-smooth 还在 dsh.profile.bundles 里，把它移除（依赖条目可以留着）。
