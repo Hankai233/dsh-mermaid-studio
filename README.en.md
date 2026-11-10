@@ -14,7 +14,7 @@ The engine is mermaid 11.17.2, bundled into the plugin. No network access.
 
 - Works on `div.md-code-block` elements. The language comes from three signals in union: the banner text, a `language-*` class, and a strict first-line keyword.
 - The host renders the banner label for mermaid as the localized generic text "代码块" (code block), not as `mermaid`. The plugin hands that generic label to the first-line rule, while a fence with a real language label (`python`, `ts`, …) is still never claimed.
-- Governance keys inside `%%{init: …}%%` and frontmatter (`securityLevel`, `htmlLabels`, `maxTextSize`, `fontFamily`, `themeVariables`, …) are stripped from the source before rendering. When something was stripped, the card shows a small "init directive ignored" badge; the diagram still renders.
+- Governance keys inside `%%{init: …}%%` and frontmatter (`securityLevel`, `htmlLabels`, `maxTextSize`, `fontFamily`, `themeVariables`, …) are stripped from the source before rendering. When something was stripped, the control row shows a small "init directive ignored" note; the diagram still renders.
 - Empty fences, comment-only fences and directive-only fences get no card and never enter the queue.
 
 ### Rendering
@@ -38,13 +38,42 @@ The engine is mermaid 11.17.2, bundled into the plugin. No network access.
 - If IndexedDB cannot open (private mode, quota errors), the plugin uses memory only, warns once, and keeps working.
 - Keys are built from source, theme, font, engine version and sanitizer version; changing any of them produces a new entry.
 
-### Interaction
+### Gestures
 
-- No persistent toolbar: hovering the diagram floats a row of six icon buttons at the top-right (zoom in · zoom out · reset · diagram/source · export SVG · fullscreen), one 16px line-icon set on 28px square buttons; it hides again when the pointer leaves, and appears on keyboard focus too.
 - Ctrl/⌘ + wheel zooms around the pointer; a plain wheel still scrolls the page.
 - Drag to pan, with moves coalesced per frame (20 consecutive `pointermove` events result in 1 style write). Double-click toggles between "fit page" and 100%.
 - The zoom ceiling is derived from the diagram's actual size (`LAYER_MAX_PX = 8192`) so the composited layer stays inside the GPU texture budget.
-- Fullscreen is a CSS overlay, not the Fullscreen API: Esc closes it, focus returns to the trigger, and `body.style.overflow` is restored to whatever it was. Inside it the same icon row floats at the top-right — it wakes when the pointer moves and fades after 1.6 s of stillness. The order is zoom in · zoom percentage · zoom out · reset · export · exit; the percentage is a text field you can type into (Enter or blur applies it), and reset returns to 100%.
+### Card controls
+
+No persistent toolbar. Hovering the diagram floats an icon row at the top-right; it hides when the pointer leaves and appears on keyboard focus as well.
+
+| Icon | Action | Behaviour |
+| --- | --- | --- |
+| Plus | Zoom in | 1.25× around the canvas centre, bounded by the per-diagram zoom ceiling |
+| Minus | Zoom out | 1 / 1.25 |
+| Circular arrow | Reset zoom | Back to the initial fit-to-width |
+| Code brackets | Diagram / source | Click again to go back. In source view the same row stays put above the code block |
+| Download | Export SVG | Exports the filtered tree |
+| Corner brackets | Fullscreen | Opens the fullscreen overlay |
+
+The icons are inline SVG: 16×16 grid, 1.6 stroke, round caps and joins, `currentColor`, on 28×28 buttons. Colour follows the theme, so hover and pressed states need no second icon set for dark mode. The buttons carry no text — their names live in `title` and `aria-label` (zoom in / zoom out / reset zoom / show source / export as SVG / fullscreen), which keeps them readable to screen readers and on hover.
+
+### Fullscreen
+
+Fullscreen is a CSS overlay, not the Fullscreen API: Esc closes it, focus returns to the trigger, and `body.style.overflow` is restored to whatever it was.
+
+In fullscreen the whole screen is the canvas, so "show on hover" would mean "always shown"; instead the row wakes when the pointer moves and fades after 1.6 s of stillness (it stays while focus is inside it). Same icon set:
+
+| Control | Action |
+| --- | --- |
+| Plus | Zoom in 1.25× |
+| Zoom percentage | Shows the current scale; click it and type a percentage, Enter or blur applies it |
+| Minus | Zoom out 1 / 1.25 |
+| Circular arrow | Reset zoom, **back to 100%** |
+| Download | Export as SVG |
+| Cross | Exit fullscreen (same as Esc) |
+
+A typed percentage still passes through the per-diagram zoom ceiling: asking for 800% gets clamped and the field then shows the applied value; a non-numeric entry snaps back to the current value. Escape inside the field only reverts that edit — it does not close the overlay. There is no source toggle in fullscreen, because there is no code block there.
 
 ### Export
 
@@ -149,7 +178,7 @@ These are deliberate, not open bugs:
 - **Each new diagram costs 50–90 ms of synchronous rendering.** mermaid needs a DOM, so it cannot move to a Worker. The serial queue prevents concurrency but cannot split it further.
 - **SVG is the only export format.** PNG/JPG needed a second render plus a canvas encode of up to 27.8 Mpx, which is exactly what made the previous export stall.
 - **Theme only follows.** No manual switch, no per-diagram override.
-- **Source view has no canvas to hover.** There the same row sits above the code block instead; the fullscreen overlay keeps its own bar (with a zoom readout and a close button).
+- **No source view in fullscreen.** Fullscreen has only the canvas, so the row has no source toggle there. On the card, switching to source view makes the row sit above the code block instead.
 - Smart file names, full keyboard control and a complete focus trap are P1 and not implemented.
 
 ---
@@ -179,7 +208,7 @@ lib/                    build output (committed: installation needs it)
 
 ### Verification status
 
-26 cases: 23 pass, 3 need a human (coexistence with the old plugin, rollback drill, P1 keyboard focus). 11 pure-logic unit tests.
+28 cases: 25 pass, 3 need a human (coexistence with the old plugin, rollback drill, P1 keyboard focus). 11 pure-logic unit tests.
 
 `node qa/acceptance.mjs --gate` still fails: the blocker is the rollback drill, which needs a real plugin disable/enable with timing and cannot be scripted.
 
@@ -189,8 +218,10 @@ On this machine (Chromium 156, 16 cores, DPR 1, no CPU throttling) with a 3693×
 
 | Metric | Value |
 | --- | --- |
-| Page load complete | 93 ms with **0 long tasks during load** (before removing the idle warm-up: 2 × 180 ms) |
-| First diagram on a cold page, to ready | 302 ms (185 ms engine evaluation + 97 ms render, two tasks, skeleton visible in between) |
+| Page load complete (DCL) | 93–104 ms with **0 long tasks during load** (before removing the idle warm-up: 2 × 180 ms) |
+| First paint | 32–44 ms |
+| Plugin bundle fetched | 3.6 MB / 20–30 ms (local) |
+| First diagram on a cold page, to ready | 302–311 ms (~185 ms engine evaluation + ~97 ms render, two tasks, skeleton visible in between) |
 | Second diagram (engine warm) | 82 ms |
 | Cache key computation | 0.3 ms |
 | SVG export | 1 ms / 39 KB |
