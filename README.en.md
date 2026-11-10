@@ -40,7 +40,7 @@ The engine is mermaid 11.17.2, bundled into the plugin. No network access.
 
 ### Interaction
 
-- No persistent toolbar: hovering the diagram floats a row of six buttons at the top-right (`+` zoom in · `−` zoom out · reset · `</>` diagram/source · export SVG · `⛶` fullscreen); it hides again when the pointer leaves, and appears on keyboard focus too.
+- No persistent toolbar: hovering the diagram floats a row of six buttons at the top-right (`+` zoom in · `−` zoom out · reset · `</>` diagram/source · export SVG · fullscreen); it hides again when the pointer leaves, and appears on keyboard focus too. The canvas box follows the drawing's aspect and opens on a whole-diagram fit.
 - Ctrl/⌘ + wheel zooms around the pointer; a plain wheel still scrolls the page.
 - Drag to pan, with moves coalesced per frame (20 consecutive `pointermove` events result in 1 style write). Double-click toggles between "fit page" and 100%.
 - The zoom ceiling is derived from the diagram's actual size (`LAYER_MAX_PX = 8192`) so the composited layer stays inside the GPU texture budget.
@@ -105,7 +105,7 @@ Register it in the profile, one of two ways:
 Two checks after installing:
 
 1. If `dsh-mermaid-smooth` is still enabled, disable it. Both plugins insert a card next to the same code block, which gives you two toolbars.
-2. Send a message with a mermaid fence — it should render directly. Hover the diagram and a row appears at the top-right: `+` `−` `重置` (reset) `</>` `导出 SVG` (export) `⛶`; `window.__mmsStats` in the browser console shows the counters.
+2. Send a message with a mermaid fence — it should render directly. Hover the diagram and a row appears at the top-right: `+` `−` `重置` (reset) `</>` `导出 SVG` (export) and a fullscreen icon; `window.__mmsStats` in the browser console shows the counters.
 
 Rollback steps and a troubleshooting table are in [scripts/rollback.md](scripts/rollback.md).
 
