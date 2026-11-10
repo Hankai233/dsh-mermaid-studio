@@ -32,7 +32,8 @@
     /* Floating controls: hidden until the pointer is over the diagram (or focus is inside it), bottom-right. pointer-events stay off while hidden so the row never swallows a drag. */
     '.mms-float{position:absolute;right:10px;top:10px;z-index:6;display:flex;align-items:center;gap:2px;padding:3px;border-radius:10px;border:1px solid var(--mms-border);background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-base,#fff));backdrop-filter:blur(6px);box-shadow:var(--dsw-shadow-lv2,0 6px 18px rgba(0,0,0,.18));opacity:0;transform:translateY(-4px);pointer-events:none;transition:opacity .12s ease,transform .12s ease}',
     '.mms-card:hover .mms-float,.mms-float:focus-within{opacity:1;transform:none;pointer-events:auto}',
-    '.mms-float .mms-btn{padding:2px 8px;font-size:12px;line-height:20px;min-width:26px;justify-content:center}',
+    '.mms-float .mms-btn{width:28px;height:28px;padding:0;min-width:0;display:inline-flex;align-items:center;justify-content:center}',
+    '.mms-float .mms-btn svg{display:block;width:16px;height:16px}',
     '.mms-float-note{margin:0 8px 0 6px;font:11px/1.4 inherit;color:var(--dsw-alias-state-warn-label,#b27a00);white-space:nowrap}',
     '@media (prefers-reduced-motion:reduce){.mms-float{transition:none}}',
     '.mms-vp[data-dragging="1"]{cursor:grabbing;touch-action:none}',

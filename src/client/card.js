@@ -31,11 +31,56 @@
     return node;
   }
 
-  function iconButton(label, title, action) {
-    var button = el('button', 'mms-btn mms-btn-icon', label);
+
+  var ICON_NS = 'http://www.w3.org/2000/svg';
+
+  /**
+   * Line icon on a 16x16 grid. Shared by every button in the floating row so the
+   * set reads as one family: same box, same stroke weight, same cap/join, colour
+   * inherited from the button (currentColor) so hover and pressed states need no
+   * icon-specific rules.
+   */
+  function icon(paths) {
+    var svg = g.document.createElementNS(ICON_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.6');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    for (var i = 0; i < paths.length; i += 1) {
+      var path = g.document.createElementNS(ICON_NS, 'path');
+      path.setAttribute('d', paths[i]);
+      svg.appendChild(path);
+    }
+    return svg;
+  }
+
+  var ICONS = {
+    zoomIn: ['M8 3.2v9.6', 'M3.2 8h9.6'],
+    zoomOut: ['M3.2 8h9.6'],
+    // circular arrow with the arrowhead on the gap: reads as "back to the start"
+    reset: ['M5.24 4.71A4.3 4.3 0 1 0 10.76 4.71', 'M11.11 6.68L10.76 4.71 12.76 4.71'],
+    source: ['M6 4.2L2.4 8l3.6 3.8', 'M10 4.2L13.6 8l-3.6 3.8'],
+    download: ['M8 2.9v6.8', 'M5.1 6.9L8 9.8l2.9-2.9', 'M3.3 11.4v1.7c0 .5.4.9.9.9h7.6c.5 0 .9-.4.9-.9v-1.7'],
+    expand: [
+      'M6 2.6H3.6c-.55 0-1 .45-1 1V6',
+      'M10 2.6h2.4c.55 0 1 .45 1 1V6',
+      'M6 13.4H3.6c-.55 0-1-.45-1-1V10',
+      'M10 13.4h2.4c.55 0 1-.45 1-1V10'
+    ]
+  };
+
+  function iconButton(node, title, action) {
+    var button = el('button', 'mms-btn mms-btn-icon');
     button.type = 'button';
     button.title = title;
     button.setAttribute('aria-label', title);
+    button.appendChild(node);
     button.addEventListener('click', function (event) {
       event.preventDefault();
       event.stopPropagation();
@@ -123,25 +168,25 @@
       note.title = '源码里的 init 指令包含被禁止的配置键，已从源码中剥离';
       floatBar.appendChild(note);
     }
-    var zoomInButton = textButton('+', '放大', function () {
+    var zoomInButton = iconButton(icon(ICONS.zoomIn), '放大', function () {
       controller.zoomBy(1.25);
     });
-    var zoomOutButton = textButton('−', '缩小', function () {
+    var zoomOutButton = iconButton(icon(ICONS.zoomOut), '缩小', function () {
       controller.zoomBy(1 / 1.25);
     });
-    var resetZoomButton = textButton('重置', '重置缩放（回到适应宽度）', function () {
+    var resetZoomButton = iconButton(icon(ICONS.reset), '重置缩放（回到适应宽度）', function () {
       controller.fitWidth();
     });
-    var viewButton = textButton('</>', '显示源代码', function () {
+    var viewButton = iconButton(icon(ICONS.source), '显示源代码', function () {
       setView(state.view === 'diagram' ? 'code' : 'diagram');
     });
     // Export is SVG only: the raster path needed a second htmlLabels:false
     // render plus a 27.8 Mpx canvas encode, which is what made the whole app
     // stutter.
-    var exportButton = textButton('导出 SVG', '导出为 SVG 文件', function () {
+    var exportButton = iconButton(icon(ICONS.download), '导出为 SVG 文件', function () {
       doExportSvg();
     });
-    var fullscreenButton = iconButton('⛶', '全屏查看', function () {
+    var fullscreenButton = iconButton(icon(ICONS.expand), '全屏查看', function () {
       app.openViewer(card);
     });
 

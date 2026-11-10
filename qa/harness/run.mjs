@@ -163,8 +163,14 @@ test('1', async (page) => {
     out.push(window.__A('通用标签 + 非 mermaid 首行 → 不成图', false, !!(genericPython.previousElementSibling && genericPython.previousElementSibling.classList.contains('mms-card'))));
     out.push(window.__A('卡片紧邻代码块（不移动 React 节点）', true, cards.every((c) => c.nextIsBlock)));
     const firstCard = document.querySelector('.mms-card');
-    const toolbarText = Array.from(firstCard.querySelectorAll('.mms-float button')).map((b) => b.textContent.trim());
-    out.push(window.__A('悬浮按钮顺序：+ − 重置 </> 导出 SVG ⛶', '+|−|重置|</>|导出 SVG|⛶', toolbarText.join('|')));
+    const buttons = Array.from(firstCard.querySelectorAll('.mms-float button'));
+    out.push(window.__A('悬浮按钮顺序（按 aria-label）', '放大|缩小|重置缩放（回到适应宽度）|显示源代码|导出为 SVG 文件|全屏查看', buttons.map((b) => b.getAttribute('aria-label')).join('|')));
+    out.push(window.__A('六个按钮都是 SVG 图标、没有文字', '6/6', buttons.filter((b) => b.querySelector('svg') && !b.textContent.trim()).length + '/' + buttons.length));
+    const consistent = buttons.filter((b) => {
+      const svg = b.querySelector('svg');
+      return svg && svg.getAttribute('viewBox') === '0 0 16 16' && svg.getAttribute('stroke-width') === '1.6' && svg.getAttribute('stroke') === 'currentColor' && svg.getAttribute('fill') === 'none';
+    }).length;
+    out.push(window.__A('图标风格统一（同 viewBox / 线宽 / currentColor / 无填充）', '6', String(consistent)));
     out.push(window.__A('没有常驻工具栏', null, document.querySelector('.mms-bar')));
     out.push(window.__A('渲染计数 >= 3', true, (window.__stats().renderCount || 0) >= 3, (window.__stats().renderCount || 0) >= 3));
     // P0-10: five identical fences share one cache key but must each get a card.
@@ -348,16 +354,16 @@ test('4b', async (page) => {
       return m ? +m[3] : null;
     };
     const click = (label) => {
-      const button = Array.from(card.querySelectorAll('.mms-float button')).find((b) => b.textContent.trim() === label);
+      const button = Array.from(card.querySelectorAll('.mms-float button')).find((b) => (b.getAttribute('aria-label') || '').indexOf(label) === 0);
       button.click();
     };
     const fit = read();
-    click('+');
+    click('放大');
     const afterPlus = read();
-    click('−');
-    click('−');
+    click('缩小');
+    click('缩小');
     const afterMinus = read();
-    click('重置');
+    click('重置缩放');
     const afterReset = read();
     return { fit, afterPlus, afterMinus, afterReset };
   });
@@ -368,7 +374,7 @@ test('4b', async (page) => {
   // </> toggles the source view and the row stays reachable
   const view = await page.evaluate(async () => {
     const card = document.querySelector('.mms-card');
-    const button = Array.from(card.querySelectorAll('.mms-float button')).find((b) => b.textContent.trim() === '</>');
+    const button = Array.from(card.querySelectorAll('.mms-float button')).find((b) => (b.getAttribute('aria-label') || '').indexOf('显示源代码') === 0);
     button.click();
     await new Promise((r) => setTimeout(r, 120));
     const codeView = card.getAttribute('data-view');
@@ -390,7 +396,8 @@ test('5', async (page) => {
     const out = [];
     const card = document.querySelector('.mms-card');
     const overflowBefore = document.body.style.overflow;
-    const trigger = card.querySelector('.mms-btn-icon');
+    const trigger = Array.from(card.querySelectorAll('.mms-float button')).find((b) => (b.getAttribute('aria-label') || '') === '全屏查看');
+    if (!trigger) throw new Error('全屏按钮未找到');
     trigger.focus();
     trigger.click();
     await window.__waitFor(() => !!document.querySelector('[data-mms-overlay]'), 5000);
@@ -956,7 +963,7 @@ test('8', async (page) => {
   return page.evaluate(async () => {
     const out = [];
     const card = document.querySelector('.mms-card');
-    const toolbar = Array.from(card.querySelectorAll('.mms-float button')).map((b) => b.textContent.trim());
+    const toolbar = Array.from(card.querySelectorAll('.mms-float button')).map((b) => b.getAttribute('aria-label') || '');
     out.push(window.__A('悬浮按钮里没有主题开关', false, toolbar.some((t) => t.indexOf('主题') === 0)));
 
     const before = window.__stats();
