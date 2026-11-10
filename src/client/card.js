@@ -57,25 +57,6 @@
     return button;
   }
 
-  /** Four corner brackets: reads as "expand" in any font, unlike the ⛶ glyph. */
-  function expandIcon() {
-    var ns = 'http://www.w3.org/2000/svg';
-    var svg = g.document.createElementNS(ns, 'svg');
-    svg.setAttribute('viewBox', '0 0 16 16');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '1.6');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.setAttribute('aria-hidden', 'true');
-    ['M6 2.5H2.5V6', 'M10 2.5h3.5V6', 'M6 13.5H2.5V10', 'M10 13.5h3.5V10'].forEach(function (d) {
-      var path = g.document.createElementNS(ns, 'path');
-      path.setAttribute('d', d);
-      svg.appendChild(path);
-    });
-    return svg;
-  }
-
   function createCard(app, fence) {
     var config = app.config;
     var stats = app.stats;
@@ -148,8 +129,8 @@
     var zoomOutButton = textButton('−', '缩小', function () {
       controller.zoomBy(1 / 1.25);
     });
-    var resetZoomButton = textButton('重置', '重置缩放（整图铺满）', function () {
-      controller.fitPage();
+    var resetZoomButton = textButton('重置', '重置缩放（回到适应宽度）', function () {
+      controller.fitWidth();
     });
     var viewButton = textButton('</>', '显示源代码', function () {
       setView(state.view === 'diagram' ? 'code' : 'diagram');
@@ -160,10 +141,9 @@
     var exportButton = textButton('导出 SVG', '导出为 SVG 文件', function () {
       doExportSvg();
     });
-    var fullscreenButton = iconButton('', '全屏查看', function () {
+    var fullscreenButton = iconButton('⛶', '全屏查看', function () {
       app.openViewer(card);
     });
-    fullscreenButton.appendChild(expandIcon());
 
     floatBar.appendChild(zoomInButton);
     floatBar.appendChild(zoomOutButton);
@@ -184,29 +164,6 @@
       stage: stage,
       onScale: function () {}
     });
-
-    // The message column can change width after first paint. Re-measure the canvas
-    // box on width changes, otherwise a diagram sized inside a narrow first frame
-    // stays small forever.
-    var cardResizeObserver = null;
-    var resizeFrame = 0;
-    var lastCardWidth = 0;
-    function measureOnResize() {
-      if (resizeFrame) return;
-      resizeFrame = requestAnimationFrame(function () {
-        resizeFrame = 0;
-        if (!root.isConnected || state.view !== 'diagram' || state.phase !== 'ready') return;
-        var width = Math.round(viewport.getBoundingClientRect().width);
-        if (!width || width === lastCardWidth) return;
-        lastCardWidth = width;
-        sizeViewportToContent(stage.firstElementChild);
-        controller.refit();
-      });
-    }
-    if (typeof g.ResizeObserver === 'function') {
-      cardResizeObserver = new g.ResizeObserver(measureOnResize);
-      cardResizeObserver.observe(root);
-    }
 
     var statusTimer = null;
     function flash(text) {
@@ -234,9 +191,7 @@
       MMS.writeLs(MMS.CONFIG.LS_VIEW_PREFIX + key.slice(0, 12), state.view);
       if (state.view === 'diagram' && state.phase === 'ready') {
         requestAnimationFrame(function () {
-          if (!root.isConnected) return;
-          sizeViewportToContent(stage.firstElementChild);
-          controller.refit();
+          if (root.isConnected) controller.refit();
         });
       }
       app.onViewChange(card, state.view);
@@ -260,24 +215,6 @@
       skeleton.removeAttribute('data-sized');
       skeleton.style.height = '';
       skeleton.style.width = '';
-    }
-
-    /**
-     * Height of the canvas box follows the drawing: wide diagrams get a short box
-     * instead of a mostly-empty tall one. Clamped so tiny or huge diagrams stay
-     * usable, and untouched while the user is zoomed in (no jumping on zoom).
-     */
-    function sizeViewportToContent(svg) {
-      if (!svg) return;
-      var viewBox = svg.getAttribute('viewBox');
-      if (!viewBox) return;
-      var parts = viewBox.split(/[\s,]+/).map(Number);
-      if (parts.length !== 4 || !(parts[2] > 0) || !(parts[3] > 0)) return;
-      var box = viewport.getBoundingClientRect();
-      var width = box.width || 800;
-      var wanted = Math.round(width * (parts[3] / parts[2]));
-      var maxHeight = Math.min(560, Math.round((g.innerHeight || 800) * 0.44));
-      viewport.style.height = Math.max(120, Math.min(maxHeight, wanted)) + 'px';
     }
 
     /** Give the injected SVG a definite layout size so fit/zoom maths is exact. */
@@ -305,7 +242,6 @@
         state.sanitized = result;
         state.error = null;
         normalizeInjectedSize(result.svg);
-        sizeViewportToContent(result.svg);
         clearSkeletonSize();
         setPhase('ready');
         root.setAttribute('aria-label', (meta && meta.title) || 'Mermaid 图');
@@ -314,7 +250,7 @@
         // full layout of a 3693 px SVG (measured: a 191 ms long task on first
         // render), and fitWidth() already centres what it needs to.
         requestAnimationFrame(function () {
-          controller.fitPage();
+          controller.fitWidth();
         });
         if (meta && meta.clamped) flash('图过大，已按比例缩放');
         return true;
@@ -411,12 +347,6 @@
         if (disposed) return;
         disposed = true;
         if (statusTimer) clearTimeout(statusTimer);
-        if (cardResizeObserver) cardResizeObserver.disconnect();
-        if (resizeFrame) {
-          var cancelFrame = g.cancelAnimationFrame || clearTimeout;
-          cancelFrame(resizeFrame);
-          resizeFrame = 0;
-        }
         controller.dispose();
         if (root.parentNode) root.parentNode.removeChild(root);
         stage.replaceChildren();

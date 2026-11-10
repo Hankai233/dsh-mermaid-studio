@@ -124,7 +124,7 @@
       if (!isFinite(s) || s <= 0) return false;
       state.s = s;
       state.x = (view.w - content.w * s) / 2;
-      state.y = Math.max(mode === 'width' ? 8 : 0, (view.h - content.h * s) / 2);
+      state.y = mode === 'width' ? Math.min(0, (view.h - content.h * s) / 2) : (view.h - content.h * s) / 2;
       state.mode = mode;
       state.fitted = true;
       apply();

@@ -163,11 +163,8 @@ test('1', async (page) => {
     out.push(window.__A('通用标签 + 非 mermaid 首行 → 不成图', false, !!(genericPython.previousElementSibling && genericPython.previousElementSibling.classList.contains('mms-card'))));
     out.push(window.__A('卡片紧邻代码块（不移动 React 节点）', true, cards.every((c) => c.nextIsBlock)));
     const firstCard = document.querySelector('.mms-card');
-    // icon-only buttons carry no text: fall back to the accessible name
-    const toolbarText = Array.from(firstCard.querySelectorAll('.mms-float button')).map(
-      (b) => b.textContent.trim() || b.getAttribute('aria-label') || ''
-    );
-    out.push(window.__A('悬浮按钮顺序：+ − 重置 </> 导出 SVG 全屏', '+|−|重置|</>|导出 SVG|全屏查看', toolbarText.join('|')));
+    const toolbarText = Array.from(firstCard.querySelectorAll('.mms-float button')).map((b) => b.textContent.trim());
+    out.push(window.__A('悬浮按钮顺序：+ − 重置 </> 导出 SVG ⛶', '+|−|重置|</>|导出 SVG|⛶', toolbarText.join('|')));
     out.push(window.__A('没有常驻工具栏', null, document.querySelector('.mms-bar')));
     out.push(window.__A('渲染计数 >= 3', true, (window.__stats().renderCount || 0) >= 3, (window.__stats().renderCount || 0) >= 3));
     // P0-10: five identical fences share one cache key but must each get a card.
@@ -366,7 +363,7 @@ test('4b', async (page) => {
   });
   out.push({ name: '+ 放大', expected: '倍数变大', actual: zoom.afterPlus, pass: zoom.afterPlus > zoom.fit });
   out.push({ name: '− 缩小', expected: '倍数变小', actual: zoom.afterMinus, pass: zoom.afterMinus < zoom.fit });
-  out.push({ name: '重置回到初始视图（整图铺满）', expected: zoom.fit, actual: zoom.afterReset, pass: Math.abs(zoom.afterReset - zoom.fit) < 0.01 });
+  out.push({ name: '重置回到适应宽度', expected: zoom.fit, actual: zoom.afterReset, pass: Math.abs(zoom.afterReset - zoom.fit) < 0.01 });
 
   // </> toggles the source view and the row stays reachable
   const view = await page.evaluate(async () => {

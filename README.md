@@ -104,7 +104,7 @@ node scripts/build.mjs
 装完检查两件事：
 
 1. 如果还装着 `dsh-mermaid-smooth`，把它停用。两个插件都会往同一个代码块插卡片，会出现两套工具栏。
-2. 对话里发一条 mermaid 围栏，应该直接成图。把鼠标移到图上，右上角浮出 `+` `−` `重置` `</>` `导出 SVG` `全屏`；浏览器控制台执行 `window.__mmsStats` 能看到计数器。
+2. 对话里发一条 mermaid 围栏，应该直接成图。把鼠标移到图上，右上角浮出 `+` `−` `重置` `</>` `导出 SVG` `⛶`；浏览器控制台执行 `window.__mmsStats` 能看到计数器。
 
 回滚步骤和故障速查见 [scripts/rollback.md](scripts/rollback.md)。
 
