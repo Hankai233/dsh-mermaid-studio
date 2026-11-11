@@ -11,7 +11,10 @@
 (function (g) {
   'use strict';
   var MMS = g.__MMS__;
-  var ID = 'dsh-mermaid-studio';
+  // Must equal package.json `name` exactly: the host keys the client module
+  // row by package name, and a shorter id makes the loader treat this bundle
+  // as "loaded without registering", re-execute it, and die on the duplicate.
+  var ID = '@hankai233/dsh-mermaid-studio';
 
   function boot() {
     if (!g.__ModuleLoader__ || typeof g.__ModuleLoader__.load !== 'function') {
