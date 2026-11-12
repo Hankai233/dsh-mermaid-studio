@@ -37,9 +37,38 @@ The plugin ships as a two-half bundle: the host half only carries configuration,
 1. **Find the fence** — scan the host's `div.md-code-block` elements and decide the language from three signals: banner text, a `language-*` class, and a strict first-line keyword. The banner shows a localised generic label for mermaid, so the first-line rule is the fallback. A hit inserts a card *before* the code block — **the block itself is never touched** (the plugin does not write to host-owned nodes).
 2. **Strip governance keys** — `%%{init: …}%%` and frontmatter keys such as `securityLevel`, `htmlLabels`, `fontFamily` and `themeVariables` are removed, so one diagram cannot change global render settings; the control row says so when it happened.
 3. **Look up the cache** — key = `sha1(source · theme · font · engine version · sanitizer version)`. Memory first (50 entries), then IndexedDB (32 MB, 30 days, byte-based LRU).
-4. **Render** — only on a double miss, and only in the serial queue. mermaid needs a DOM, so it runs on the main thread at 50–90 ms per new diagram; the queue guarantees no concurrency (the engine's `initialize()` is global state and concurrent renders bleed themes).
+4. **Render** — only on a double miss, and only in the serial queue. mermaid needs a DOM, so it runs on the main thread: measured on a 120-node / 103-edge flowchart that is ~230 ms, an ordinary diagram is ~10 ms, and the engine's first evaluation adds ~180 ms once per page. The queue guarantees no concurrency (the engine's `initialize()` is global state and concurrent renders bleed themes).
 5. **Filter, then inject** — the SVG is parsed into a detached document, filtered through element/attribute whitelists, its `<style>` rebuilt through CSSOM with `#<renderId>` prefixes, and only then `importNode`d in. **Cache hits take the same exit**: stored strings are treated as untrusted input, because any same-origin script can write that database.
 6. **Uninstall cleanly** — remove cards, the `<style>`, both observers, delete the IndexedDB database and clear local keys.
+
+### The three performance mechanisms
+
+**Reserved skeleton size** — a card exists before its diagram does, and a zero-height card makes the whole conversation shift when the SVG lands. Card construction reads a synchronous size memo (`localStorage`, keyed like the cache, capped at 200 rows) and reserves that height; without a row it guesses from the source line count (clamped to 96–420 px). The memo is a hint: a miss or a corrupt row costs a guess, never a card.
+
+**Controlled prerender** — lazy rendering means "render when scrolled to", and scrolling is exactly when a ~240 ms main-thread block hurts most. Offscreen fences are therefore rendered *earlier*, in a quiet idle window, and stored, so arrival is a cache hit. The gates are the feature, not a safety net bolted on afterwards:
+
+- only with `cacheEnabled` (the product of the work is a cache write);
+- only after at least one real scroll/input — a page nobody has touched yet is not idle, it is being read, and the load window stays free of long tasks;
+- quiet for ≥1 s, tab visible, render queue empty, fence unchanged for 600 ms (half-streamed text is never prerendered);
+- one job at a time; a user-facing render overtakes everything queued and drops pending background jobs;
+- a failed prerender writes nothing: no negative-cache entry, no error card for a diagram nobody has seen — they get an ordinary render on arrival;
+- background timeouts never feed the breaker, so two stuck prerenders cannot disable the plugin.
+
+**Font guard** — a cache record freezes the geometry the engine measured. A webfont that has not settled would be measured against a fallback and then kept for 30 days with no way to self-correct, so writes are skipped while `document.fonts.status !== 'loaded'` (counted in `__mmsStats.cacheSkipFont`).
+
+### Reading the numbers yourself
+
+`window.__mmsStats` carries a duration ledger, not just counters:
+
+```js
+__mmsStats.renderLastMs    // last render, ms
+__mmsStats.renderP50       // median / p95 over the last 20 renders
+__mmsStats.renderP95
+__mmsStats.renderLastLines // source size of that render, so "only big ones are slow" is checkable
+__mmsStats.longTaskCount   // whole-page main-thread blocks > 50 ms
+__mmsStats.longTaskRenderCount // the subset overlapping a mermaid render window
+__mmsStats.prerenderDone   // successful prerenders
+```
 
 ## Deployment
 
@@ -99,7 +128,7 @@ Do not modify plugin source, and do not disable DSH security settings to make a 
 ## Limits
 
 - **The cache is shared across conversations.** The host exposes no session id, so the scope degrades to a constant and the same source in another conversation hits the same record. Deleting a conversation does not delete its diagrams; the exits are the 30-day expiry, uninstalling, or setting `cacheEnabled` to `false`.
-- **Each new diagram costs 50–90 ms of synchronous rendering.** mermaid needs a DOM, so it cannot move to a Worker.
+- **A new complex diagram costs ~230 ms of synchronous rendering** (a 120-node flowchart on this machine), plus ~180 ms for the engine's first evaluation per page. mermaid needs a DOM, so it cannot move to a Worker; prerender moves that work earlier instead of making it cheaper.
 - **SVG is the only export.** PNG/JPG needed a second render plus a canvas encode of up to 27.8 Mpx, which is exactly what made export stall, so it was removed.
 
 ## Development

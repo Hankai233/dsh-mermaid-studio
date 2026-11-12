@@ -29,6 +29,30 @@
     LAZY_RENDER: true,
     /** mermaid@11 MAX_TEXTLENGTH; above this the engine throws anyway. */
     MAX_SOURCE_CHARS: 50000,
+    /** Perf ledger seen through __mmsStats: how many recent renders keep a duration. */
+    RENDER_MS_WINDOW: 20,
+    /** A main-thread block above this is what a user feels as jank. */
+    LONG_TASK_MS: 50,
+    /**
+     * Controlled offscreen prerender. Renders a fence nobody is looking at yet
+     * during a quiet idle window, so arriving there is a cache hit instead of a
+     * ~240 ms main-thread block. Gated by cacheEnabled: the product is a cache
+     * write, so a disabled cache means nothing to prerender for.
+     */
+    PRERENDER: true,
+    /** Scroll/input must have been quiet this long before background work starts. */
+    PRERENDER_QUIET_MS: 1000,
+    /** Give up waiting for an idle window rather than start late. */
+    PRERENDER_IDLE_TIMEOUT_MS: 2000,
+    /** A fence must be unchanged this long: mid-stream text must never be prerendered. */
+    PRERENDER_STABLE_MS: 600,
+    /** Skeleton size memo (localStorage), keyed like the cache but far cheaper. */
+    LS_SIZE_PREFIX: 'mms:size:',
+    SIZE_MEMO_MAX: 200,
+    /** Cold-start skeleton guess when no size is remembered yet. */
+    SKELETON_MIN_PX: 96,
+    SKELETON_MAX_PX: 420,
+    SKELETON_PER_LINE_PX: 34,
     RENDER_TIMEOUT_MS: 15000,
     NEGATIVE_TTL_MS: 300000,
     STREAM_DEBOUNCE_MS: 300,

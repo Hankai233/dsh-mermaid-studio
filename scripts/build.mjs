@@ -31,6 +31,7 @@ const OUT = path.join(ROOT, 'lib');
 const CHUNKS = [
   'config.js',
   'stats.js',
+  'sizes.js',
   'fence.js',
   'key.js',
   'theme.js',

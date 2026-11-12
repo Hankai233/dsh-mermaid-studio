@@ -28,6 +28,26 @@
     var running = null;
     var breakerOpen = false;
     var consecutiveTimeouts = 0;
+    /**
+     * Recent [start, end] windows of this queue's own renders. The long-task
+     * observer (index.js) has no other way to tell a block caused by a mermaid
+     * render from one caused by the host app, so attribution uses `startTime`
+     * against these windows instead of guessing.
+     */
+    var windows = [];
+
+    function now() {
+      return typeof g.performance !== 'undefined' && g.performance.now ? g.performance.now() : Date.now();
+    }
+
+    function closeWindow(at) {
+      for (var i = windows.length - 1; i >= 0; i -= 1) {
+        if (!windows[i].end) {
+          windows[i].end = at;
+          return;
+        }
+      }
+    }
 
     function noteTimeout() {
       consecutiveTimeouts += 1;
@@ -46,6 +66,9 @@
       running = job;
       if (job.uid && typeof job.onStart === 'function') job.onStart();
 
+      var startedAt = now();
+      windows.push({ start: startedAt, end: 0 });
+      if (windows.length > 10) windows.shift();
       var settled = false;
       var timedOut = false;
       var isolated = false;
@@ -58,6 +81,21 @@
         clearTimeout(timer);
         clearTimeout(abandonTimer);
         running = null;
+        closeWindow(now());
+        if (kind === 'ready') {
+          noteSuccess();
+          // The one place a render duration is measured: after the promise
+          // settles, before the queue hands the slot on. Without this the perf
+          // ledger has no samples and every "it is slow" report is a guess.
+          if (stats && typeof stats.noteRender === 'function') {
+            var source = job.source || '';
+            stats.noteRender(now() - startedAt, {
+              lines: source ? source.split('\n').length : 0,
+              chars: source.length,
+              background: !!job.background
+            });
+          }
+        }
         if (kind === 'ready') noteSuccess();
         try {
           onOutcome({
@@ -95,7 +133,9 @@
         if (settled) return;
         timedOut = true;
         if (stats) stats.note('timeoutCount');
-        noteTimeout();
+        // A background job must never feed the breaker: two stuck prerenders
+        // would otherwise lock out every render the user can actually see.
+        if (!job.background) noteTimeout();
         // Report the timeout, keep the slot: the engine is still running.
         onOutcome({
           type: 'timeout',
@@ -146,7 +186,21 @@
     }
 
     function push(job) {
-      pending.push(job);
+      // Foreground work overtakes everything queued: a prerender that has not
+      // started yet must never delay a diagram the user is looking at.
+      if (job && !job.background) {
+        var at = -1;
+        for (var i = 0; i < pending.length; i += 1) {
+          if (pending[i] && pending[i].background) {
+            at = i;
+            break;
+          }
+        }
+        if (at >= 0) pending.splice(at, 0, job);
+        else pending.push(job);
+      } else if (job) {
+        pending.push(job);
+      }
       pump();
       return {
         cancel: function () {
@@ -154,6 +208,18 @@
           if (at >= 0) pending.splice(at, 1);
         }
       };
+    }
+
+    /** Drop every queued background job; a running one cannot be aborted. */
+    function dropBackground() {
+      var kept = [];
+      var dropped = 0;
+      for (var i = 0; i < pending.length; i += 1) {
+        if (pending[i] && pending[i].background) dropped += 1;
+        else kept.push(pending[i]);
+      }
+      pending = kept;
+      return dropped;
     }
 
     function clear() {
@@ -173,6 +239,7 @@
       push: push,
       clear: clear,
       reset: reset,
+      dropBackground: dropBackground,
       isBreakerOpen: function () {
         return breakerOpen;
       },
@@ -181,6 +248,15 @@
       },
       length: function () {
         return pending.length;
+      },
+      backgroundLength: function () {
+        var total = 0;
+        for (var i = 0; i < pending.length; i += 1) if (pending[i] && pending[i].background) total += 1;
+        return total;
+      },
+      /** Render windows, for attributing observed long tasks to this queue. */
+      windows: function () {
+        return windows.slice();
       },
       isBusy: function () {
         return !!running;

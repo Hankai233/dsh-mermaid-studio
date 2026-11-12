@@ -26,6 +26,7 @@
     var sanitizer = MMS.createSanitizer({ stats: stats });
     var exporter = MMS.createExporter({ stats: stats });
     var renderer = MMS.createRenderer({ stats: stats });
+    var sizes = MMS.createSizes({ stats: stats });
     var negative = new Map();
     /**
      * Scope resolution is cached per chat root, not globally: memoising the very
@@ -44,6 +45,85 @@
 
     var queue = MMS.createQueue({ renderer: renderer, stats: stats, onOutcome: dispatch });
     var cache = MMS.createCache({ stats: stats, config: config });
+
+    /**
+     * Activity signals for the prerender gates.
+     *
+     * `activity` fires on the first movement of any input; `quiet` fires once the
+     * user has stopped for PRERENDER_QUIET_MS. Both listeners are passive and
+     * capture-phase, so observing a scroll costs nothing measurable — a gate that
+     * adds jank to the gesture it is trying to protect is worse than no gate.
+     */
+    var lastActivity = Date.now();
+    /** False until the user has scrolled/typed once: a page nobody touched is not idle, it is unread. */
+    var sawActivity = false;
+    var quietTimer = null;
+    var activityHandlers = [];
+    var quietHandlers = [];
+
+    function fireActivity() {
+      lastActivity = Date.now();
+      sawActivity = true;
+      for (var i = 0; i < activityHandlers.length; i += 1) {
+        try {
+          activityHandlers[i]();
+        } catch (error) {
+          stats.error('activity handler: ' + error.message);
+        }
+      }
+      if (quietTimer) clearTimeout(quietTimer);
+      quietTimer = setTimeout(function () {
+        quietTimer = null;
+        for (var j = 0; j < quietHandlers.length; j += 1) {
+          try {
+            quietHandlers[j]();
+          } catch (error) {
+            stats.error('quiet handler: ' + error.message);
+          }
+        }
+      }, MMS.CONFIG.PRERENDER_QUIET_MS);
+    }
+
+    function subscribe(list, fn) {
+      list.push(fn);
+      return function () {
+        var at = list.indexOf(fn);
+        if (at >= 0) list.splice(at, 1);
+      };
+    }
+
+    /**
+     * Long-task ledger. The observer cannot say whose task it was, but every mermaid
+     * render has a recorded [start, end] window on the queue, so a task whose
+     * `startTime` falls inside one is attributed to us and everything else to the
+     * host. Without that split, "the plugin janks" and "the app janks" are the
+     * same number.
+     */
+    var longTasks = null;
+    if (typeof g.PerformanceObserver === 'function' && typeof g.PerformanceLongTaskTiming !== 'undefined') {
+      try {
+        longTasks = new g.PerformanceObserver(function (list) {
+          var entries = list.getEntries();
+          var windows = queue.windows();
+          for (var i = 0; i < entries.length; i += 1) {
+            var entry = entries[i];
+            var during = false;
+            for (var w = windows.length - 1; w >= 0; w -= 1) {
+              var win = windows[w];
+              var end = win.end || entry.startTime + entry.duration;
+              if (entry.startTime >= win.start && entry.startTime <= end + 1) {
+                during = true;
+                break;
+              }
+            }
+            stats.noteLongTask(entry.duration, during);
+          }
+        });
+        longTasks.observe({ entryTypes: ['longtask'] });
+      } catch (error) {
+        longTasks = null; // unsupported: the ledger simply stays at zero
+      }
+    }
 
     function theme() {
       // Always follows the host; there is no manual override any more.
@@ -147,7 +227,22 @@
       renderer: renderer,
       queue: queue,
       cache: cache,
+      sizes: sizes,
       negative: negative,
+      /** Milliseconds since the last observed scroll/input. */
+      activityAge: function () {
+        return Date.now() - lastActivity;
+      },
+      /** Whether any gesture was observed at all. */
+      hasActivity: function () {
+        return sawActivity;
+      },
+      onActivity: function (fn) {
+        return subscribe(activityHandlers, fn);
+      },
+      onQuiet: function (fn) {
+        return subscribe(quietHandlers, fn);
+      },
       theme: theme,
       mermaidVersion: mermaidVersion,
       fontFamily: fontFamily,
@@ -177,9 +272,19 @@
         if (viewer) viewer.close();
         if (unsubscribeTheme) unsubscribeTheme();
         if (unmountStyles) unmountStyles();
+        detachActivity();
+        if (longTasks) {
+          try {
+            longTasks.disconnect();
+          } catch (error) {
+            /* already gone */
+          }
+          longTasks = null;
+        }
         // Uninstall contract (design §11): no cards, no style, no store, no
         // stats, no mms:* preferences left behind.
         cache.dropDatabase();
+        sizes.clear();
         MMS.clearPrefs();
         try {
           delete g[MMS.CONFIG.STATS_KEY];
@@ -191,6 +296,34 @@
 
     var unsubscribeTheme = null;
     var unmountStyles = null;
+
+    var ACTIVITY_EVENTS = ['scroll', 'wheel', 'keydown', 'pointerdown', 'touchstart'];
+    var activityListener = function () {
+      fireActivity();
+    };
+    var activityAttached = false;
+
+    function attachActivity() {
+      if (activityAttached || !g.addEventListener) return;
+      activityAttached = true;
+      for (var i = 0; i < ACTIVITY_EVENTS.length; i += 1) {
+        g.addEventListener(ACTIVITY_EVENTS[i], activityListener, { passive: true, capture: true });
+      }
+    }
+
+    function detachActivity() {
+      if (quietTimer) {
+        clearTimeout(quietTimer);
+        quietTimer = null;
+      }
+      if (!activityAttached || !g.removeEventListener) return;
+      activityAttached = false;
+      for (var i = 0; i < ACTIVITY_EVENTS.length; i += 1) {
+        g.removeEventListener(ACTIVITY_EVENTS[i], activityListener, { passive: true, capture: true });
+      }
+      activityHandlers.length = 0;
+      quietHandlers.length = 0;
+    }
 
     function themeChanged() {
       if (scanner) scanner.rerenderAll();
@@ -208,6 +341,7 @@
       app: app,
       start: function () {
         unmountStyles = MMS.styles.mount();
+        attachActivity();
         scanner = MMS.startScanner(app);
         unsubscribeTheme = MMS.theme.subscribe(function () {
           if (!disposed) themeChanged();

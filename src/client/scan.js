@@ -59,6 +59,19 @@
      */
     var cardStates = new WeakMap();
 
+    // The prerender gates hang off two app signals: "the user has gone quiet"
+    // and "the user is back". Both are passive listeners owned by index.js.
+    var offQuiet = app.onQuiet
+      ? app.onQuiet(function () {
+          schedulePrerender();
+        })
+      : null;
+    var offActivity = app.onActivity
+      ? app.onActivity(function () {
+          cancelBackground();
+        })
+      : null;
+
     function stateOf(block) {
       return blockStates.get(block) || null;
     }
@@ -186,6 +199,7 @@
         }
       }
       sweepOrphans(record);
+      schedulePrerender();
     }
 
     // ── one candidate ──────────────────────────────────────────────────────
@@ -280,6 +294,10 @@
         rejected: fence.rejected
       });
       card.mount(block);
+      // Reserve the diagram's box before the first paint: a card that starts at
+      // zero height and grows when the SVG lands is what shifts the whole
+      // conversation under the reader.
+      if (card.presize) card.presize();
       var blockRecord = {
         uid: uid('b'),
         root: record.root,
@@ -410,6 +428,12 @@
     }
 
     function enqueue(blockRecord, key, theme) {
+      // A prerender already under way lands in this very card; queuing a second
+      // render for it would just duplicate ~240 ms of work.
+      if (blockRecord.job && blockRecord.job.background && !blockRecord.job.superseded) return;
+      // Foreground work cancels queued background work: nothing the user is
+      // looking at may wait behind a diagram nobody has scrolled to yet.
+      if (app.queue.dropBackground) app.queue.dropBackground();
       var job = {
         uid: uid('j'),
         key: key,
@@ -429,6 +453,135 @@
       app.queue.push(job);
     }
 
+    // ── controlled offscreen prerender ─────────────────────────────────────
+    /*
+     * The lazy gate (scheduleRender) means a diagram is rendered at the moment
+     * it scrolls into view — which is exactly the moment a ~240 ms main-thread
+     * block is most expensive, because the reader is mid-scroll. This path pays
+     * that block earlier, in a quiet idle window, and stores the SVG, so arrival
+     * is a cache hit.
+     *
+     * The gates are the feature, not safety rails bolted on afterwards:
+     *   - cacheEnabled only: the product of the work *is* a cache write.
+     *   - no user input/scroll for PRERENDER_QUIET_MS, and never while the tab
+     *     is hidden (both mean the user is not waiting on us).
+     *   - one job at a time, and only when the queue is empty (never in front of
+     *     a real render).
+     *   - the fence must be unchanged for PRERENDER_STABLE_MS, so mid-stream
+     *     text is never prerendered.
+     *   - a failed prerender writes nothing: no negative-cache entry, no error
+     *     card for a diagram the user has not seen. They get an ordinary render
+     *     when they arrive.
+     */
+    var bgTimer = null;
+    var bgInflight = null;
+    var bgAttempted = {};
+
+    function prerenderEnabled() {
+      if (disposed || !MMS.CONFIG.PRERENDER) return false;
+      if (!app.config.cacheEnabled) return false;
+      if (doc.hidden) return false;
+      if (app.isBreakerOpen()) return false;
+      // No gesture yet means the page is still being read for the first time, not
+      // that the reader is idle: at boot the plugin has no evidence either way, so
+      // it does nothing and waits for a real quiet window after a real gesture.
+      if (app.hasActivity && !app.hasActivity()) return false;
+      return true;
+    }
+
+    function queueIsBusy() {
+      return app.queue.isBusy() || app.queue.length() > 0;
+    }
+
+    /** Run in an idle window or not at all: starting late is worse than skipping. */
+    function idleBackground(fn) {
+      if (typeof g.requestIdleCallback === 'function') {
+        return g.requestIdleCallback(fn, { timeout: MMS.CONFIG.PRERENDER_IDLE_TIMEOUT_MS });
+      }
+      return setTimeout(fn, 0);
+    }
+
+    function cancelBackground() {
+      if (bgTimer !== null) {
+        if (typeof g.cancelIdleCallback === 'function') g.cancelIdleCallback(bgTimer);
+        else clearTimeout(bgTimer);
+        bgTimer = null;
+      }
+      if (app.queue.dropBackground) {
+        var dropped = app.queue.dropBackground();
+        if (dropped && app.stats) app.stats.note('prerenderCancelled', dropped);
+      }
+    }
+
+    /** The first offscreen fence that is stable, unrendered and not yet tried. */
+    function pickBackgroundTarget() {
+      var best = null;
+      roots.forEach(function (record) {
+        if (best) return;
+        record.cards.forEach(function (blockRecord) {
+          if (best) return;
+          if (blockRecord.visible || !blockRecord.block.isConnected) return;
+          if (blockRecord.job || blockRecord.timer || blockRecord.dirty) return;
+          if (!blockRecord.card || blockRecord.card.state.phase !== 'pending') return;
+          if (!blockRecord.source) return;
+          if (blockRecord.fence && blockRecord.fence.overLong) return;
+          if (bgAttempted[blockRecord.key]) return;
+          if (app.negative.get(blockRecord.key)) return;
+          best = blockRecord;
+        });
+      });
+      return best;
+    }
+
+    function startBackgroundRender(target) {
+      if (disposed || bgInflight) return;
+      var job = {
+        uid: uid('bg'),
+        key: target.key,
+        source: target.source,
+        theme: app.theme(),
+        renderId: app.nextRenderId(target.uid),
+        fontFamily: app.fontFamily(target.block),
+        superseded: false,
+        background: true,
+        stale: function () {
+          return !target.block.isConnected || target.card.state.phase !== 'pending';
+        }
+      };
+      target.job = job;
+      bgInflight = job.uid;
+      if (app.stats) app.stats.note('prerenderScheduled');
+      app.queue.push(job);
+    }
+
+    /**
+     * Ask for one prerender. Cheap to call often: every gate is re-checked at
+     * fires time, because a scroll may arrive during the idle wait.
+     */
+    function schedulePrerender() {
+      if (!prerenderEnabled() || bgTimer !== null || bgInflight) return;
+      if (queueIsBusy()) return;
+      if (app.activityAge() < MMS.CONFIG.PRERENDER_QUIET_MS) return;
+      var target = pickBackgroundTarget();
+      if (!target) return;
+      bgTimer = idleBackground(function () {
+        bgTimer = null;
+        if (!prerenderEnabled() || bgInflight || queueIsBusy()) return;
+        if (app.activityAge() < MMS.CONFIG.PRERENDER_QUIET_MS) return;
+        if (target.visible || !target.block.isConnected || target.job) return;
+        bgAttempted[target.key] = true;
+        app.cache
+          .get(target.key)
+          .then(function (record) {
+            if (record || disposed) return; // already stored: nothing to prerender
+            startBackgroundRender(target);
+          })
+          .catch(function () {
+            startBackgroundRender(target);
+          });
+      });
+    }
+
     // ── outcomes from the queue ────────────────────────────────────────────
     function onOutcome(outcome) {
       if (disposed) return;
@@ -444,6 +597,17 @@
       var target = findRecordByUid(outcome.uid);
       if (!target || !target.card) return;
       if (target.job && target.job.uid !== outcome.uid) return; // superseded attempt
+      var background = !!(target.job && target.job.background);
+      if (background) bgInflight = null;
+
+      function finishBackground(kind) {
+        target.job = null;
+        if (app.stats) app.stats.note(kind);
+        app.stats.publish();
+        // Chain the next candidate; a batch of offscreen diagrams is rendered
+        // one idle window at a time, never as a burst.
+        schedulePrerender();
+      }
 
       if (outcome.type === 'ready') {
         var record = app.cache.makeRecord({
@@ -473,16 +637,29 @@
           }
         }
         app.cache.put(record).catch(function () {});
+        if (background) finishBackground('prerenderDone');
         return;
       }
 
       if (outcome.type === 'timeout') {
+        // A prerender that times out stays invisible: no error card for a
+        // diagram the user has not seen, and no negative-cache entry either.
+        if (background) {
+          finishBackground('prerenderSkipped');
+          return;
+        }
         target.card.showError('渲染超时（15 秒）', true, '可以重试；若连续超时请点「重置渲染器」');
         return;
       }
 
       if (outcome.type === 'error') {
         var message = (outcome.error && outcome.error.message) || '渲染失败';
+        // Never judge a diagram nobody has looked at: a background failure just
+        // stops the attempt, so the reader gets an ordinary render on arrival.
+        if (background) {
+          finishBackground('prerenderSkipped');
+          return;
+        }
         target.card.showError('渲染失败', true, message);
         app.negative.set(target.key, Date.now());
         return;
@@ -503,6 +680,9 @@
 
     // ── theme changes ──────────────────────────────────────────────────────
     function rerenderAll() {
+      // Every key changes with the theme, so any queued prerender is aimed at a
+      // record that will never be requested again.
+      cancelBackground();
       roots.forEach(function (record) {
         record.cards.forEach(function (blockRecord) {
           if (!blockRecord.block.isConnected) return;
@@ -518,6 +698,11 @@
     function disposeAll() {
       disposed = true;
       clearTimeout(scopeFallbackTimer);
+      cancelBackground();
+      if (offQuiet) offQuiet();
+      if (offActivity) offActivity();
+      bgInflight = null;
+      bgAttempted = {};
       roots.forEach(function (record, root) {
         dropRoot(root);
       });
@@ -570,6 +755,16 @@
 
     return {
       rerenderAll: rerenderAll,
+      /** QA: force a prerender attempt past the quiet gate. */
+      schedulePrerender: schedulePrerender,
+      prerenderState: function () {
+        return {
+          enabled: prerenderEnabled(),
+          scheduled: bgTimer !== null,
+          inflight: bgInflight,
+          attempted: Object.keys(bgAttempted).length
+        };
+      },
       rerenderCard: function (card) {
         var hit = null;
         roots.forEach(function (record) {

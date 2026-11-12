@@ -253,18 +253,40 @@
     }
 
     function setSkeletonSize(width, height) {
-      if (!width || !height) return;
+      if (!height || !(height > 0)) return;
       skeleton.setAttribute('data-sized', '1');
       var box = viewport.getBoundingClientRect();
-      if (!box.width) return;
-      var scale = Math.min(box.width / width, 1);
-      skeleton.style.height = Math.max(80, Math.round(height * scale)) + 'px';
+      // A remembered width lets the reserved box match the diagram's display
+      // scale; without one the raw height is still better than nothing.
+      var scale = box.width && width ? Math.min(box.width / width, 1) : 1;
+      skeleton.style.height = Math.max(MMS.CONFIG.SKELETON_MIN_PX, Math.round(height * scale)) + 'px';
     }
 
     function clearSkeletonSize() {
       skeleton.removeAttribute('data-sized');
       skeleton.style.height = '';
       skeleton.style.width = '';
+    }
+
+    /**
+     * Reserve the diagram's box before the first paint.
+     *
+     * Called from the scanner right after mount. A synchronous size memo is the
+     * only source that can be read this early (the cache record is async), so a
+     * remembered size is exact and a guess is approximate — either way the card
+     * no longer starts at zero height and then jumps when the SVG lands.
+     */
+    function presize() {
+      if (state.phase !== 'pending') return;
+      var sizes = app.sizes;
+      if (!sizes) return;
+      var memo = sizes.get(key);
+      if (memo) {
+        setSkeletonSize(memo.width, memo.height);
+        return;
+      }
+      var guess = sizes.guess(fence.source);
+      if (guess) setSkeletonSize(0, guess);
     }
 
     /** Give the injected SVG a definite layout size so fit/zoom maths is exact. */
@@ -284,6 +306,20 @@
       svg.style.height = svg.getAttribute('height') || '';
     }
 
+    /** The key moves when the theme does; the size memo must follow it. */
+    function keyNow() {
+      return (card && card.key) || key;
+    }
+
+    /** Persist the measured box so the next mount reserves it before paint. */
+    function rememberSize(svg) {
+      var sizes = app.sizes;
+      if (!sizes || !svg) return;
+      var width = parseFloat(svg.getAttribute('width'));
+      var height = parseFloat(svg.getAttribute('height'));
+      if (isFinite(height) && height > 0) sizes.set(keyNow(), isFinite(width) ? width : 0, height);
+    }
+
     function showSvg(svgString, renderId, meta) {
       try {
         var result = app.sanitizer.inject(stage, svgString, renderId);
@@ -292,6 +328,7 @@
         state.sanitized = result;
         state.error = null;
         normalizeInjectedSize(result.svg);
+        rememberSize(result.svg);
         clearSkeletonSize();
         setPhase('ready');
         root.setAttribute('aria-label', (meta && meta.title) || 'Mermaid 图');
@@ -369,6 +406,7 @@
         if (block && block.parentNode) block.parentNode.insertBefore(root, block);
       },
       setSkeletonSize: setSkeletonSize,
+      presize: presize,
       showSvg: showSvg,
       showError: showError,
       showOverLong: showOverLong,

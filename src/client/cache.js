@@ -22,6 +22,21 @@
     }
   }
 
+  /**
+   * Whether the document's fonts have finished settling.
+   *
+   * `loaded` is the only state that guarantees `getBBox()` measured the font the
+   * user will actually see; `loading` means at least one font face is pending, so
+   * any geometry measured now may be provisional. A document without a
+   * FontFaceSet (or a host that disables it) counts as settled: the guard must
+   * never disable caching on a platform where it cannot be evaluated.
+   */
+  function fontsSettled(doc) {
+    var fonts = doc && doc.fonts;
+    if (!fonts || typeof fonts.status !== 'string') return true;
+    return fonts.status === 'loaded';
+  }
+
   function requestAsPromise(request) {
     return new Promise(function (resolve, reject) {
       request.onsuccess = function () {
@@ -223,6 +238,16 @@
     function put(record) {
       if (!record || !record.key) return Promise.resolve(false);
       if (!config.cacheEnabled) return Promise.resolve(false);
+      // A record freezes the geometry the engine measured at write time. If a
+      // webfont is still settling, that geometry is measured against a fallback
+      // and the record would keep the wrong one for CACHE_TTL_DAYS — with no way
+      // for the user to know, and no way for the plugin to self-correct later.
+      // Skipping the write costs one re-render; writing the wrong one costs 30
+      // days of a visibly wrong diagram.
+      if (!fontsSettled(g.document)) {
+        if (stats) stats.note('cacheSkipFont');
+        return Promise.resolve(false);
+      }
       l1Set(record.key, record);
       if (stats) stats.cacheWrite += 1;
       return tx('readwrite', function (store) {
@@ -457,5 +482,5 @@
   }
 
   MMS.createCache = createCache;
-  MMS.cacheInternal = { byteLength: byteLength };
+  MMS.cacheInternal = { byteLength: byteLength, fontsSettled: fontsSettled };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

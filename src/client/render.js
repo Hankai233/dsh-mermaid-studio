@@ -13,8 +13,19 @@
   'use strict';
   var MMS = g.__MMS__ || (g.__MMS__ = {});
 
-  /** Base config. `theme`, `fontFamily` and `htmlLabels` are per-call. */
-  function baseConfig(theme, fontFamily, htmlLabels) {
+  /**
+   * Base config. `theme` and `fontFamily` are per-call.
+   *
+   * `htmlLabels` is deliberately absent: it stays at the engine default
+   * (`true`, i.e. foreignObject). It used to be accepted here as a third
+   * parameter that was never written into the config — a documented "per-call"
+   * knob that did nothing, and was absent from the cache key, so flipping it
+   * would have changed neither the output nor the key. It was removed rather
+   * than wired up: switching it to `false` measured ~0.5 ms on the insertion
+   * layout (the only place it could plausibly matter) while changing how labels
+   * wrap and clip. Measured in qa/bench-insert-layout.mjs.
+   */
+  function baseConfig(theme, fontFamily) {
     return {
       startOnLoad: false,
       securityLevel: 'strict',
