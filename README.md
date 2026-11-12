@@ -70,6 +70,8 @@ __mmsStats.longTaskRenderCount // 其中与 mermaid 渲染窗口重叠的次数
 __mmsStats.prerenderDone   // 成功的预渲染次数
 ```
 
+每次改动都记在 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
+
 
 ## 部署
 

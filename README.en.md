@@ -70,6 +70,8 @@ __mmsStats.longTaskRenderCount // the subset overlapping a mermaid render window
 __mmsStats.prerenderDone   // successful prerenders
 ```
 
+Every change is recorded in [docs/CHANGELOG.md](docs/CHANGELOG.md).
+
 ## Deployment
 
 Requires DSH `>= 0.2.1-rc.2`. Works in the desktop app and the web UI.
