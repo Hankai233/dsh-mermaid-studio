@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icons/icon-dark.svg">
+  <img src="assets/icons/icon-light.svg" width="96" height="96" alt="dsh-mermaid-studio">
+</picture>
+
 # dsh-mermaid-studio
 
 DeepSeek Harness 插件：对话里的 mermaid 围栏直接渲染成图。图能缩放、能全屏、能导出 SVG，渲染结果留在本地，同一张图切回来不用重画。

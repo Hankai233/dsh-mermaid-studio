@@ -41,6 +41,13 @@
 | 2026-11-13 20:12 | 图标 | 换成时序线图标（64 网格），并补上 `package.json` 的 `icon` 字段 —— 此前插件页读不到本包图标；1024 深浅双版存进 `assets/icons/` | `4b7f815` |
 | 2026-11-13 20:55 | 发布 | 0.2.0 发布到 npm（GitHub Actions，推送 tag `v0.2.0` 触发）；包内含新图标与 `assets/icons/` | `4b7f815` |
 | 2026-11-13 21:06 | CI | publish 工作流的 checkout / setup-node 升到 v5（v4 仍以 Node 20 为目标，GitHub 已强制 Node 24）；0.2.1 发到 npm（tag `v0.2.1`） | `ad8f139` |
+| 2026-11-13 21:15 | 文档 | README 顶部加插件图标，`<picture>` 按深浅主题切 light/dark 两套 SVG | — |
+
+## [未发布]
+
+### 文档
+
+- 2026-11-13 · **README 顶部加插件图标（中英双版），用 `<picture>` 跟随深浅主题。** GitHub 支持按 `prefers-color-scheme` 切 `<source>`：深色主题取 `assets/icons/icon-dark.svg`（`#5b7bff`），浅色取 `icon-light.svg`（`#002fa7`）—— 单张透明图在 GitHub 深色底上只有 1.8:1，等于看不见；`<img>` 保留作降级，npm 这类不解析 `<picture>` 的渲染器仍会显示浅色版。图标与插件页那张 64 网格的 `icon.svg` 同源，只是走 1024 的矢量版。（`README.md`、`README.en.md`）
 
 ## 0.2.1 - 2026-11-13
 
