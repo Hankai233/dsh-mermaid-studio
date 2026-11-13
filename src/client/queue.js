@@ -54,12 +54,61 @@
       if (consecutiveTimeouts >= 2 && !breakerOpen) {
         breakerOpen = true;
         if (stats) stats.queueBreaker = 1;
-        onOutcome({ type: 'breaker', queueLength: pending.length });
+        try {
+          onOutcome({ type: 'breaker', queueLength: pending.length });
+        } catch (error) {
+          if (stats) stats.error('onOutcome: ' + error.message);
+        }
+        // An open breaker must not strand the work already queued behind it.
+        settlePending();
       }
     }
 
     function noteSuccess() {
       consecutiveTimeouts = 0;
+    }
+
+    /**
+     * Settle a job that will never run because the breaker is open.
+     *
+     * The breaker means "stop taking work", not "queue it silently". pump() used
+     * to just return, so a job pushed while it was open stayed in `pending`
+     * forever: its card kept the skeleton animation with no timeout, no error
+     * and no reset button (the button only shows via showError), and every one
+     * of those jobs held its whole source alive while scrolling kept adding
+     * more.
+     *
+     * Settlement goes through the same onOutcome channel as any other end of a
+     * job, as a `timeout`. That is the one existing outcome that reaches the
+     * "error card + reset button" state without side effects that outlive
+     * reset(): scan.js renders a foreground timeout as showError() and, because
+     * isBreakerOpen() is true, the reset button is visible — while an `error`
+     * outcome would also write a NEGATIVE_TTL_MS entry, so after reset() the
+     * card would still refuse to render for five minutes. A background job
+     * keeps its invisibility: scan.js treats a background timeout as a silent
+     * prerenderSkipped (no card, no negative entry).
+     */
+    function settleBlocked(job) {
+      if (!job) return;
+      try {
+        onOutcome({
+          type: 'timeout',
+          uid: job.uid,
+          key: job.key,
+          breaker: true, // distinguishes this from a render that really timed out
+          error: new Error('renderer breaker is open; render skipped')
+        });
+      } catch (error) {
+        if (stats) stats.error('onOutcome: ' + error.message);
+      }
+    }
+
+    /** Drain `pending` through settleBlocked(); nothing is left parked. */
+    function settlePending() {
+      if (pending.length === 0) return;
+      var blocked = pending;
+      pending = [];
+      for (var i = 0; i < blocked.length; i += 1) settleBlocked(blocked[i]);
     }
 
     function start(job) {
@@ -119,6 +168,14 @@
         clearTimeout(timer);
         clearTimeout(abandonTimer);
         running = null;
+        // The window opened in start() has to be closed on this path too. It
+        // used to be closed only in finish(), so every abandoned render left
+        // `end: 0` behind; index.js then backfills `end = start + duration` and
+        // attributes *every later long task* to a render, permanently poisoning
+        // the p95 of the session's render cost. closeWindow() takes the newest
+        // open window and is a no-op once none is open, so the normal path
+        // (finish() closed it, settled is true, we return above) is untouched.
+        closeWindow(now());
         pump();
       }
 
@@ -176,7 +233,12 @@
     }
 
     function pump() {
-      if (breakerOpen || running || pending.length === 0) return;
+      if (breakerOpen) {
+        // Whichever path opened the breaker, nothing may stay parked behind it.
+        settlePending();
+        return;
+      }
+      if (running || pending.length === 0) return;
       var job = pending.shift();
       if (job && job.stale && job.stale()) {
         pump();
@@ -186,6 +248,15 @@
     }
 
     function push(job) {
+      // Settle on the spot while the breaker is open: a job accepted here would
+      // never be consumed by pump(), so this is the card's only exit (see
+      // settleBlocked). reset() reopens the queue, so this is not a dead end.
+      if (breakerOpen) {
+        settleBlocked(job);
+        return {
+          cancel: function () {}
+        };
+      }
       // Foreground work overtakes everything queued: a prerender that has not
       // started yet must never delay a diagram the user is looking at.
       if (job && !job.background) {

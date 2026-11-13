@@ -32,6 +32,22 @@
     var stats = options && options.stats;
     var prefix = MMS.CONFIG.LS_SIZE_PREFIX;
     var max = MMS.CONFIG.SIZE_MEMO_MAX;
+    /**
+     * How many rows this plugin believes it owns in localStorage. -1 = not
+     * measured yet, which the first successful write fixes with one scan; after
+     * that every write/remove adjusts it in O(1).
+     *
+     * `set()` runs once per diagram card, and `keys()` walks the *whole origin*
+     * — localStorage is shared with the host and every other plugin, so the
+     * old per-write `keys().length` check made each card a synchronous scan of
+     * hundreds of keys it does not own. The cap is still enforced: the counter
+     * crossing `max` prunes immediately, and a quota error prunes and retries.
+     */
+    var known = -1;
+    /** Writes since the last full count: a cheap re-sync bound against drift. */
+    var drift = 0;
+    /** Another tab or the host may add/remove rows; recount this often, not each write. */
+    var RESYNC_EVERY = 32;
 
     function storage() {
       try {
@@ -66,7 +82,10 @@
       if (!ls) return [];
       var out = [];
       try {
-        for (var i = 0; i < ls.length; i += 1) {
+        // Read the length once: the getter is not free and the loop cannot
+        // change the store.
+        var length = ls.length;
+        for (var i = 0; i < length; i += 1) {
           var name = ls.key(i);
           if (name && name.indexOf(prefix) === 0) out.push(name);
         }
@@ -76,11 +95,39 @@
       return out;
     }
 
+    /** The one full count, on demand rather than on every write. */
+    function resyncCount() {
+      known = keys().length;
+      drift = 0;
+      return known;
+    }
+
+    function rowCount() {
+      if (known < 0) resyncCount();
+      return known;
+    }
+
+    /**
+     * Book a successful write. `known` above `max` is what triggers a prune; a
+     * periodic recount heals drift from other tabs without paying per write.
+     */
+    function accountWrite(existed) {
+      if (known < 0) {
+        // First write: the scan already includes this row, so do not add it.
+        resyncCount();
+        return;
+      }
+      if (!existed) known += 1;
+      drift += 1;
+      if (drift >= RESYNC_EVERY) resyncCount();
+    }
+
     /** Drop the oldest rows until `keep` remain. Runs only when the cap is hit. */
     function prune(keep) {
       var ls = storage();
       if (!ls) return 0;
-      var rows = keys().map(function (name) {
+      var names = keys();
+      var rows = names.map(function (name) {
         var value = parse(ls.getItem(name));
         return { name: name, at: value ? value.at : 0 };
       });
@@ -88,14 +135,20 @@
         return a.at - b.at;
       });
       var doomed = rows.slice(0, Math.max(0, rows.length - keep));
+      var removed = 0;
       for (var i = 0; i < doomed.length; i += 1) {
         try {
           ls.removeItem(doomed[i].name);
+          removed += 1;
         } catch (error) {
-          return i;
+          break;
         }
       }
-      return doomed.length;
+      // The count is what `size()` answers and what trips the cap, so prune
+      // leaves it exact instead of assuming every removal succeeded.
+      known = Math.max(0, names.length - removed);
+      drift = 0;
+      return removed;
     }
 
     return {
@@ -116,27 +169,55 @@
         var h = Number(height);
         if (!isFinite(h) || h <= 0) return false;
         var w = Number(width);
+        var name = rowKey(key);
+        var payload = JSON.stringify({
+          w: isFinite(w) && w > 0 ? Math.round(w) : 0,
+          h: Math.round(h),
+          at: Date.now()
+        });
+        var existed = false;
         try {
-          ls.setItem(
-            rowKey(key),
-            JSON.stringify({ w: isFinite(w) && w > 0 ? Math.round(w) : 0, h: Math.round(h), at: Date.now() })
-          );
+          existed = ls.getItem(name) !== null;
         } catch (error) {
-          // Quota or disabled storage: the memo is an optimisation, never a need.
-          if (stats) stats.error('size memo: ' + error.message);
-          return false;
+          existed = false;
         }
-        if (keys().length > max) prune(Math.floor(max * 0.75));
+        try {
+          ls.setItem(name, payload);
+        } catch (error) {
+          // Quota (or disabled storage) is the one moment a scan is worth it:
+          // free the oldest rows once, retry once, then degrade quietly.
+          try {
+            prune(Math.floor(max * 0.75));
+          } catch (pruneError) {
+            /* storage is unusable end to end */
+          }
+          try {
+            ls.setItem(name, payload);
+          } catch (second) {
+            if (stats) stats.error('size memo: ' + second.message);
+            return false;
+          }
+          // A prune plus a retry happened, so the count is no longer a simple
+          // increment: recount instead of guessing.
+          resyncCount();
+          return true;
+        }
+        accountWrite(existed);
+        if (known > max) prune(Math.floor(max * 0.75));
         return true;
       },
       forget: function (key) {
         var ls = storage();
         if (!ls || !key) return;
+        var name = rowKey(key);
+        var existed = false;
         try {
-          ls.removeItem(rowKey(key));
+          existed = ls.getItem(name) !== null;
+          ls.removeItem(name);
         } catch (error) {
-          /* nothing to undo */
+          return; // nothing to undo
         }
+        if (existed && known > 0) known -= 1;
       },
       /** Cold-start estimate: a diagram's height tracks its line count, weakly. */
       guess: function (source) {
@@ -150,17 +231,21 @@
         var ls = storage();
         if (!ls) return 0;
         var names = keys();
+        var removed = 0;
         for (var i = 0; i < names.length; i += 1) {
           try {
             ls.removeItem(names[i]);
+            removed += 1;
           } catch (error) {
-            return i;
+            break;
           }
         }
-        return names.length;
+        known = Math.max(0, names.length - removed);
+        drift = 0;
+        return removed;
       },
       size: function () {
-        return keys().length;
+        return rowCount();
       }
     };
   }

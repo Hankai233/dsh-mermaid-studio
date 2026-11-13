@@ -27,6 +27,8 @@
     var alwaysZoom = !!options.alwaysZoom;
     var state = { x: 0, y: 0, s: 1, mode: 'page', fitted: false };
     var drag = null;
+    /** One-shot window listener armed only when pointer capture was refused. */
+    var releaseWatch = null;
     var resizeObserver = null;
     var disposed = false;
 
@@ -230,6 +232,35 @@
       }
     }
 
+    /**
+     * Fallback for a refused `setPointerCapture`.
+     *
+     * Capture is what makes every later move/up land on this element. Without
+     * it, a release *outside* the viewport never reaches our own pointerup
+     * listener, so `drag` outlived the gesture and the diagram panned on every
+     * un-pressed mouse move until the next pointerdown. The `buttons === 0`
+     * check in onPointerMove handles the case where a move arrives at all; this
+     * listener handles the release that never does.
+     */
+    function dropReleaseWatch() {
+      if (!releaseWatch) return;
+      var target = g.window || viewport;
+      target.removeEventListener('pointerup', releaseWatch);
+      target.removeEventListener('pointercancel', releaseWatch);
+      releaseWatch = null;
+    }
+
+    function watchRelease(pointerId) {
+      dropReleaseWatch();
+      var target = g.window || viewport;
+      releaseWatch = function (event) {
+        if (event && event.pointerId !== undefined && event.pointerId !== pointerId) return;
+        endDrag(event);
+      };
+      target.addEventListener('pointerup', releaseWatch);
+      target.addEventListener('pointercancel', releaseWatch);
+    }
+
     function onPointerDown(event) {
       if (event.button !== 0) return;
       // Without this, dragging over text starts a selection and the browser
@@ -240,11 +271,22 @@
         viewport.setPointerCapture(event.pointerId);
       } catch (error) {
         /* capture is a nicety; dragging still works without it */
+        watchRelease(event.pointerId);
       }
     }
 
     function onPointerMove(event) {
       if (!drag || drag.id !== event.pointerId) return;
+      // A move is not proof that the button is still down. When capture failed,
+      // moves keep arriving after the release (and a release outside the
+      // viewport is invisible to this element), so an un-pressed move used to
+      // pan the diagram. `buttons === 0` is the release signal. Touch contact
+      // is reported as a pressed button, and the pointerType guard keeps a
+      // quirky touch driver from being read as a release.
+      if (event.buttons === 0 && event.pointerType !== 'touch') {
+        endDrag(event);
+        return;
+      }
       var dx = event.clientX - drag.x;
       var dy = event.clientY - drag.y;
       if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
@@ -264,6 +306,7 @@
 
     function endDrag(event) {
       if (!drag || (event && drag.id !== event.pointerId)) return;
+      dropReleaseWatch();
       flush();
       try {
         viewport.releasePointerCapture(drag.id);
@@ -321,6 +364,7 @@
       apply: apply,
       dispose: function () {
         disposed = true;
+        dropReleaseWatch();
         if (pendingFrame) {
           var cancel = g.cancelAnimationFrame || clearTimeout;
           cancel(pendingFrame);

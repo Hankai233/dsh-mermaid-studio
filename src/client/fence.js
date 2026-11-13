@@ -351,26 +351,43 @@
     return null;
   }
 
+  /**
+   * Strip `%%{…}%%` directives in ONE forward scan.
+   *
+   * The first version *recurred on the un-scanned tail* every time it met a
+   * directive it had to keep (`%%{wrap}%%` and friends), so the call depth grew
+   * with the number of directives: ~5000 of them (≈60 KB) threw
+   * `Maximum call stack size exceeded`, and scan.js' flush turned that into a
+   * stats counter — the fence then never rendered and said nothing at all.
+   *
+   * A cursor over the source makes the walk strictly monotonic (each step
+   * consumes at least one terminator or one line), so the stack depth is O(1)
+   * and a single pass is O(n) instead of one `slice` per directive.
+   */
   function stripInitDirectives(source) {
     var rejected = false;
-    var out = source;
-    var guard = 0;
+    var out = '';
+    var offset = 0;
+    var length = source.length;
 
-    while (guard < 50) {
-      guard += 1;
-      var open = out.indexOf('%%{');
-      if (open < 0) break;
-      var close = out.indexOf('}%%', open);
+    while (offset < length) {
+      var open = source.indexOf('%%{', offset);
+      if (open < 0) {
+        out += source.slice(offset);
+        break;
+      }
+      // Everything before the directive is already final; commit it now.
+      out += source.slice(offset, open);
+      var close = source.indexOf('}%%', open);
       if (close < 0) {
         // Unterminated directive: drop the rest of the line, it cannot render.
-        var lineEnd = out.indexOf('\n', open);
-        var cut = lineEnd < 0 ? out.length : lineEnd;
-        out = out.slice(0, open) + out.slice(cut);
+        var lineEnd = source.indexOf('\n', open);
+        offset = lineEnd < 0 ? length : lineEnd;
         rejected = true;
         continue;
       }
-      var whole = out.slice(open, close + 3);
-      var inner = out.slice(open + 3, close);
+      var whole = source.slice(open, close + 3);
+      var inner = source.slice(open + 3, close);
       var rebuilt = null;
 
       if (/^\s*init\s*:/.test(inner)) {
@@ -395,14 +412,10 @@
         rebuilt = whole;
       }
 
-      if (rebuilt === whole) {
-        // Nothing to strip here; continue scanning after this directive.
-        out = out.slice(0, open) + whole + out.slice(close + 3);
-        var resume = open + whole.length;
-        var rest = stripInitDirectives(out.slice(resume));
-        return { source: out.slice(0, resume) + rest.source, rejected: rejected || rest.rejected };
-      }
-      out = out.slice(0, open) + rebuilt + out.slice(close + 3);
+      // A kept directive and a rebuilt one take the same step: emit the text and
+      // move past it. (`rebuilt === whole` used to be a recursion exit.)
+      out += rebuilt;
+      offset = close + 3;
     }
     return { source: out, rejected: rejected };
   }
@@ -557,6 +570,16 @@
   function parseFence(block) {
     if (!isMermaidBlock(block)) return null;
     var raw = readSource(block);
+    // Bound the work by the same number that bounds rendering, *before* doing
+    // any of it: stripping walks every directive in the text, so a 200 KB fence
+    // (a pasted log inside a ```mermaid block) used to be fully parsed — and
+    // then thrown away one line later because `overLong` was computed after the
+    // strip. The result keeps the same shape, with the raw text as `source`:
+    // nothing renders or gets cached for an over-long fence, so paying for
+    // normalisation here would be the same mistake in a cheaper form.
+    if (raw.length > MMS.CONFIG.MAX_SOURCE_CHARS) {
+      return { block: block, empty: false, source: raw, rejected: false, overLong: true };
+    }
     var stripped = stripGovernanceKeys(raw);
     var source = stripped.source;
     if (!source || !hasDiagramBody(source)) {

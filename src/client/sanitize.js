@@ -93,10 +93,40 @@
   var COLOR_VALUE = /^(#[0-9a-f]{3,8}|[a-z]+|rgba?\([^)]*\)|hsla?\([^)]*\))$/i;
   var URL_REF = /url\(\s*(['"]?)([^'")]*)\1\s*\)/gi;
   var FRAGMENT = /^#[A-Za-z0-9_:.\-]+$/;
-  var ID_VALUE = /^[A-Za-z0-9_:.\-]+$/;
+  /**
+   * Ids are document-local names: they cannot fetch, load or execute anything,
+   * so the only job of this test is to keep the value from breaking out of an
+   * attribute or a CSS selector. ASCII punctuation stays banned; letters
+   * outside ASCII do not, because mermaid builds a cluster's id from its
+   * *title* — a subgraph called `分组甲` produces `id="mms-b-1-1-分组甲"`, and an
+   * ASCII-only test rejected that as "unsafe value for id", blocking the whole
+   * diagram into an error card. Node and edge labels never hit this (they are
+   * text, not ids), which is why it went unnoticed until a real browser ran a
+   * subgraph with a Chinese title.
+   */
+  var ID_VALUE = /^[A-Za-z0-9_:.\-\u00A0-\uFFFF]+$/;
   var MAX_NODES = 20000;
   var MAX_USE_DEPTH = 32;
   var MAX_RULES = 4000;
+
+  /* MAX_NODES counts elements, so a single value is otherwise unbounded: one
+     10 MB `d` attribute or one huge <style> body parses, filters and reaches
+     the compositor while still counting as one node. Both are cut here instead
+     of by the node gate.
+
+     Sizes: the SVG on the render path is generated from a fence capped at
+     CONFIG.MAX_SOURCE_CHARS (50000) characters, so nothing legitimate emits a
+     single attribute near 100000 — that is 2x the whole source budget, enough
+     headroom for generated geometry/label attributes that have no source
+     counterpart. A mermaid <style> body is emitted in full and runs to tens of
+     KB even for a large theme, so 200000 keeps ~5-10x headroom over what the
+     engine actually writes while stopping multi-MB sheets.
+
+     Over-limit is a `blocked` rejection, never a truncation: cutting a path
+     `d` or a stylesheet in half leaves invalid syntax that renders as a wrong
+     diagram and hides the real problem. */
+  var MAX_ATTR_VALUE = 100000;
+  var MAX_STYLE_TEXT = 200000;
 
   function SanitizeError(kind, message) {
     this.name = 'SanitizeError';
@@ -120,14 +150,22 @@
     );
   }
 
+  /** Resource bound shared by one attribute value and one <style> body. */
+  function textWithinLimit(text, limit) {
+    var length = String(text === null || text === undefined ? '' : text).length;
+    return length <= limit;
+  }
+
   function attrValueAllowed(name, value) {
     var v = String(value);
+    if (!textWithinLimit(v, MAX_ATTR_VALUE)) return false;
     if (name === 'href' || name === 'xlink:href') {
       return FRAGMENT.test(v) || RASTER_DATA.test(v.trim());
     }
     if (name === 'id') return ID_VALUE.test(v);
     if (PAINT_ATTRS[name] === 1) return paintValueAllowed(v);
-    if (name === 'style') return styleValueSafe(v);
+    // NB: `style` never arrives here — the attribute loop filters it through
+    // filterInlineStyle() and continues.
     return safeCssValue(v);
   }
 
@@ -179,12 +217,59 @@
     // Layout properties the label boxes rely on. Dropping them made labels sit
     // in the wrong place / clip their own text (the "some characters missing"
     // report); none of them can fetch or execute, and url() values are still
-    // rejected by safeCssValue.
+    // rejected by safeCssValue. The two that can also act as a UI-deception
+    // primitive are kept here and *narrowed* in styleDeclValueAllowed() —
+    // mermaid's htmlLabels need absolute/relative boxes, so the properties stay
+    // and only fixed/sticky and huge z-index values are refused.
     position: 1, top: 1, right: 1, bottom: 1, left: 1, 'z-index': 1,
     background: 1, 'background-color': 1, filter: 1,
     'stroke-dashoffset': 1, 'stroke-linecap': 1, 'stroke-linejoin': 1,
     'stroke-miterlimit': 1, 'shape-rendering': 1
   };
+
+  /* Value policy for the layout properties above.
+   *
+   * `position:fixed` (and `sticky`) is the one thing that turns a diagram into
+   * a full-viewport overlay — "click here" chrome over the host UI — and until
+   * now that was held back only by the card's containment (`overflow:hidden`
+   * plus `contain:paint` on the viewport and `contain:layout style paint` on
+   * the stage). One stylesheet edit that drops `contain` and the primitive is
+   * real, so the value is refused here instead of relying on containment.
+   *
+   * Everything else about the properties is preserved: absolute/relative stay
+   * (labels are positioned with them), and so do top/right/bottom/left and
+   * background/filter. `inset` is not in STYLE_PROPS at all, so the shorthand
+   * cannot re-introduce the same box with one declaration.
+   *
+   * z-index: a local stacking context needs a handful of layers. Negative
+   * values are harmless (only ordering inside the diagram's own context) so
+   * they stay; the 2^31-1 "cover the page" value does not. The ceiling is 100
+   * rather than 10 because mermaid's own theme CSS emits `z-index: 100` for its
+   * pointer-events:none label boxes (measured in mermaid@11.17.2 dist: the
+   * flowchart, journey and block diagram stylesheets each carry it) — dropping
+   * that declaration would be a silent stacking regression, and 100 buys
+   * nothing for an attacker once `position:fixed|sticky` is gone. */
+  var ALLOWED_POSITION = { 'static': 1, relative: 1, absolute: 1 };
+  var MAX_Z_INDEX = 100;
+
+  function positionValueAllowed(value) {
+    return ALLOWED_POSITION[String(value).trim().toLowerCase()] === 1;
+  }
+
+  function zIndexValueAllowed(value) {
+    var v = String(value).trim();
+    if (/^auto$/i.test(v)) return true;
+    if (!/^-?[0-9]{1,6}$/.test(v)) return false;
+    var n = parseInt(v, 10);
+    return n >= -MAX_Z_INDEX && n <= MAX_Z_INDEX;
+  }
+
+  /** @returns {boolean} whether one declaration may keep its value */
+  function styleDeclValueAllowed(prop, value) {
+    if (prop === 'position') return positionValueAllowed(value);
+    if (prop === 'z-index') return zIndexValueAllowed(value);
+    return true;
+  }
 
   /**
    * Keep the appearance declarations a style object may carry, drop the rest.
@@ -206,6 +291,9 @@
         continue;
       }
       if (!STYLE_PROPS[lower]) continue;
+      // One refused value drops that declaration only: the rest of the block
+      // (e.g. the `top:0` next to a `position:fixed`) still applies.
+      if (!styleDeclValueAllowed(lower, value)) continue;
       var priority = decl.getPropertyPriority(prop);
       parts.push(prop + ':' + value + (priority ? ' !' + priority : ''));
     }
@@ -214,25 +302,12 @@
 
   /** @returns {string|null} filtered style text, or null when it is unsafe */
   function filterInlineStyle(text) {
+    if (!textWithinLimit(text, MAX_ATTR_VALUE)) return null;
     var probe = g.document.createElement('span');
     probe.setAttribute('style', String(text));
     var result = filterDeclarations(probe.style);
     if (result.unsafe) return null;
     return result.css;
-  }
-
-  function styleValueSafe(text) {
-    var parts = String(text).split(';');
-    for (var i = 0; i < parts.length; i += 1) {
-      var decl = parts[i];
-      var colon = decl.indexOf(':');
-      if (colon < 0) continue;
-      var prop = decl.slice(0, colon).trim().toLowerCase();
-      var val = decl.slice(colon + 1).trim();
-      if (!STYLE_PROPS[prop]) return false;
-      if (!safeCssValue(val)) return false;
-    }
-    return true;
   }
 
   function rebuildStyleText(text, renderId) {
@@ -420,6 +495,11 @@
         }
 
         if (name === 'style' && !insideForeign) {
+          if (!textWithinLimit(el.textContent, MAX_STYLE_TEXT)) {
+            blocked = 'style text too large (' +
+              String(el.textContent || '').length + ' chars)';
+            return;
+          }
           styleTexts.push(el);
         }
 
@@ -494,5 +574,18 @@
     BLOCKED_ELEMENTS: BLOCKED_ELEMENTS,
     ALLOWED_ATTRS: ALLOWED_ATTRS,
     STYLE_PROPS: STYLE_PROPS
+  };
+
+  /* Test-only surface (test/sanitize.test.mjs). The value policy and the
+     resource bounds are pure functions of strings and are what a regression
+     breaks silently; everything else here needs a real DOM. Not runtime API. */
+  MMS.SANITIZE_INTERNALS = {
+    filterDeclarations: filterDeclarations,
+    attrValueAllowed: attrValueAllowed,
+    styleDeclValueAllowed: styleDeclValueAllowed,
+    textWithinLimit: textWithinLimit,
+    MAX_ATTR_VALUE: MAX_ATTR_VALUE,
+    MAX_STYLE_TEXT: MAX_STYLE_TEXT,
+    MAX_Z_INDEX: MAX_Z_INDEX
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

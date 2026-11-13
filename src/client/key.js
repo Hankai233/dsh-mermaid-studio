@@ -113,16 +113,26 @@
     ];
   }
 
-  var SENTINELS = { undefined: 1, null: 1, unknown: 1 };
-
+  /**
+   * A missing field is not a value: it must never look like a cache hit on some
+   * *other* font/theme. Throw in tests and in the harness instead of silently
+   * producing a shared entry.
+   *
+   * The test is whole-value equality, never a substring. `src:` carries the
+   * diagram source verbatim, so a legitimate diagram may contain the word
+   * `undefined` (`A["is x undefined?"]`, a state node literally named
+   * `undefined`, a diagram explaining JS). A substring test threw from
+   * `keyFor()` inside `createRecord()` — i.e. *before* the card existed — so
+   * those diagrams never rendered at all, with only a stats line to show for
+   * it. Whole-value matching still catches the real failure: string
+   * concatenation makes a missing field the exact value, `'font:' + undefined`
+   * ends in `font:undefined`, and `'themeRev:' + null` ends in `themeRev:null`.
+   */
   function assertParts(parts) {
     for (var i = 0; i < parts.length; i += 1) {
       var part = String(parts[i]);
       var value = part.slice(part.indexOf(':') + 1);
-      // A key built from a missing field is indistinguishable from a hit on a
-      // different font/theme — throw in tests and in the harness rather than
-      // silently producing a shared entry.
-      if (SENTINELS[value] || value.indexOf('undefined') >= 0) {
+      if (value === 'undefined' || value === 'null' || value === 'unknown') {
         throw new Error('cache key input contains a sentinel: ' + part);
       }
     }

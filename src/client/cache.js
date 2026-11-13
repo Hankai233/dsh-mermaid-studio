@@ -57,6 +57,29 @@
     var warned = false;
     var hitUpdates = new Map(); // key -> pending lastUsed/hits bump
     var flushTimer = null;
+    /**
+     * Running total of `record.bytes` in L2, kept in memory instead of measured
+     * from the store. `null` = not loaded yet.
+     *
+     * `enforceCapacity()` used to `getAll()` after *every* put, so once the
+     * cache was non-empty each finished diagram deserialized the whole store
+     * into the heap — O(store) work, on the tail of a render, in the plugin
+     * whose whole purpose is removing that jank. The total is now loaded once
+     * (lazily, before the first write), adjusted by each write's delta and each
+     * delete, and only a total above the cap is allowed to pay for a full scan
+     * — a scan that is also the recalibration.
+     */
+    var totalBytes = null;
+    var totalPromise = null;
+    /**
+     * L1's own byte budget, because `L1_MAX` alone bounds only the *count*.
+     * Every L1 entry carries its full SVG, so 50 diagrams of 1–2 MB pinned
+     * ~100 MB of heap while `CACHE_MAX_MB` governed L2 only — a real OOM source
+     * with no counterpressure. Half the L2 cap keeps the warm scrollback
+     * meaningful without competing with the store it mirrors.
+     */
+    var l1BudgetBytes = Math.floor((MMS.CONFIG.CACHE_MAX_MB * 1024 * 1024) / 2);
+    var l1Bytes = 0;
 
     function warnOnce(error) {
       if (warned) return;
@@ -197,11 +220,43 @@
       return record;
     }
 
+    /** A record's contribution to L1; `bytes` is written by makeRecord. */
+    function l1RecordBytes(record) {
+      if (!record) return 0;
+      if (typeof record.bytes === 'number' && record.bytes > 0) return record.bytes;
+      // A record written by an older build has no `bytes`; measuring its SVG is
+      // the only honest fallback, and that cost is paid once per entry.
+      return byteLength(record.svg || '');
+    }
+
+    /** Remove one entry and subtract exactly what it added. */
+    function l1Drop(key) {
+      var record = l1.get(key);
+      if (!record) return;
+      l1.delete(key);
+      l1Bytes -= l1RecordBytes(record);
+      if (l1Bytes < 0) l1Bytes = 0;
+    }
+
+    function l1Clear() {
+      l1.clear();
+      l1Bytes = 0;
+    }
+
     function l1Set(key, record) {
-      if (l1.has(key)) l1.delete(key);
+      if (!record) return;
+      // Overwriting the same key replaces its size instead of adding to it:
+      // re-rendering one diagram must not walk the counter up to the cap.
+      l1Drop(key);
+      var bytes = l1RecordBytes(record);
+      // One record larger than the whole budget cannot be kept without breaking
+      // the bound for everything else; L2 still has it, so a later mount is a
+      // slower hit, not a miss.
+      if (bytes > l1BudgetBytes) return;
       l1.set(key, record);
-      while (l1.size > MMS.CONFIG.L1_MAX) {
-        l1.delete(l1.keys().next().value);
+      l1Bytes += bytes;
+      while (l1.size > MMS.CONFIG.L1_MAX || l1Bytes > l1BudgetBytes) {
+        l1Drop(l1.keys().next().value);
       }
     }
 
@@ -218,6 +273,12 @@
         if (stats) stats.cacheHitL1 += 1;
         return Promise.resolve(hit);
       }
+      // l1Get() already promoted the record to the MRU end. If it is dead
+      // (expired, foreign schema, no svg) it must go now, or it would sit at the
+      // freshest LRU position forever while never serving a read — immortal and
+      // un-evictable. L2 may still have a usable copy (e.g. a newer write from
+      // another tab), so only the L1 copy is dropped.
+      if (hit) l1Drop(key);
       if (!config.cacheEnabled || l2Available === false) return Promise.resolve(null);
       return tx('readonly', function (store) {
         return requestAsPromise(store.get(key));
@@ -250,23 +311,21 @@
       }
       l1Set(record.key, record);
       if (stats) stats.cacheWrite += 1;
-      return tx('readwrite', function (store) {
-        store.put(record);
-        return true;
-      })
+      // Load the total *before* the write, so the base this record is added to
+      // cannot already contain it. After the first write this is a resolved
+      // promise and touches no IndexedDB.
+      return ensureTotal()
         .then(function () {
-          return enforceCapacity();
+          return writeRecord(record);
         })
+        .then(accountWrite)
         .catch(function (error) {
           warnOnce(error);
           // Quota: drop the oldest batch and retry exactly once.
           return evict(0.5)
             .then(function (evicted) {
               if (!evicted) return false;
-              return tx('readwrite', function (store) {
-                store.put(record);
-                return true;
-              });
+              return writeRecord(record).then(accountWrite);
             })
             .catch(function (second) {
               warnOnce(second);
@@ -275,10 +334,27 @@
         });
     }
 
-    function allRecords() {
+    function capBytes() {
+      return MMS.CONFIG.CACHE_MAX_MB * 1024 * 1024;
+    }
+
+    function sumBytes(list) {
+      var total = 0;
+      for (var i = 0; i < list.length; i += 1) {
+        total += (list[i] && list[i].bytes) || 0;
+      }
+      return total;
+    }
+
+    /** Full read, failures included: the counter only updates on a real answer. */
+    function readAll() {
       return tx('readonly', function (store) {
         return requestAsPromise(store.getAll());
-      })
+      });
+    }
+
+    function allRecords() {
+      return readAll()
         .then(function (list) {
           return list || [];
         })
@@ -286,6 +362,63 @@
           warnOnce(error);
           return [];
         });
+    }
+
+    function ensureTotal() {
+      if (totalBytes !== null) return Promise.resolve(totalBytes);
+      if (totalPromise) return totalPromise;
+      totalPromise = readAll()
+        .then(function (list) {
+          // `tx()` resolves null when there is no database at all: nothing can
+          // be stored, so zero is exact rather than a guess.
+          totalBytes = list ? sumBytes(list) : 0;
+          return totalBytes;
+        })
+        .catch(function (error) {
+          warnOnce(error);
+          // Unknown stays unknown: an empty-looking total would disable the cap
+          // for the rest of the session. The next write retries the load.
+          return null;
+        });
+      totalPromise.then(function () {
+        totalPromise = null;
+      });
+      return totalPromise;
+    }
+
+    /**
+     * One put plus the O(1) read of the record it replaces. The old size only
+     * exists to keep the counter exact on an overwrite (same key, re-rendered
+     * SVG): one keyed `get` in the same transaction, where the old code paid
+     * for `getAll()` per write. Resolves to the byte delta (0 when there is no
+     * database, because then nothing was stored).
+     */
+    function writeRecord(record) {
+      var previousBytes = 0;
+      return tx('readwrite', function (store) {
+        var probe = store.get(record.key);
+        probe.onsuccess = function () {
+          var previous = probe.result;
+          previousBytes = previous && typeof previous.bytes === 'number' ? previous.bytes : 0;
+          store.put(record);
+        };
+        return true;
+      }).then(function (written) {
+        if (!written) return 0;
+        return (record.bytes || 0) - previousBytes;
+      });
+    }
+
+    /**
+     * Apply a successful write to the counter, then gate. Only a total above the
+     * cap may start a scan; `enforceCapacity()` recalibrates from the store
+     * while it evicts.
+     */
+    function accountWrite(delta) {
+      if (totalBytes === null) return 0; // total unknown: no eviction on a guess
+      totalBytes += delta;
+      if (totalBytes <= capBytes()) return 0;
+      return enforceCapacity();
     }
 
     /** Delete expired, foreign-schema and foreign-engine records. */
@@ -302,9 +435,14 @@
           return false;
         });
         if (!doomed.length) return 0;
+        var freed = 0;
+        for (var i = 0; i < doomed.length; i += 1) freed += doomed[i].bytes || 0;
         return removeKeys(doomed.map(function (r) {
           return r.key;
-        }));
+        })).then(function (removed) {
+          if (removed && totalBytes !== null) totalBytes = Math.max(0, totalBytes - freed);
+          return removed;
+        });
       });
     }
 
@@ -323,24 +461,43 @@
 
     /** Byte-budget eviction: keep the store under 90% of the cap. */
     function enforceCapacity() {
-      var capBytes = MMS.CONFIG.CACHE_MAX_MB * 1024 * 1024;
-      return allRecords().then(function (list) {
-        var total = list.reduce(function (sum, record) {
-          return sum + (record.bytes || 0);
-        }, 0);
-        if (total <= capBytes) return 0;
-        var target = capBytes * 0.9;
-        var sorted = list.slice().sort(function (a, b) {
-          return (a.lastUsed || 0) - (b.lastUsed || 0);
-        });
-        var doomed = [];
-        while (total > target && sorted.length) {
-          var record = sorted.shift();
-          total -= record.bytes || 0;
-          doomed.push(record.key);
-        }
-        if (stats) stats.cacheEvict += doomed.length;
-        return removeKeys(doomed);
+      var cap = capBytes();
+      return ensureTotal().then(function (total) {
+        if (total === null) return 0; // no trustworthy total: never evict blind
+        if (total <= cap) return 0;
+        // The only full scan left, and it has to happen here: an eviction needs
+        // to know which records are oldest. It doubles as the recalibration for
+        // the running counter, which is why drift from a concurrent tab heals.
+        return readAll()
+          .then(function (list) {
+            if (!list) return 0;
+            var exact = sumBytes(list);
+            if (exact <= cap) {
+              totalBytes = exact;
+              return 0;
+            }
+            var target = cap * 0.9;
+            var sorted = list.slice().sort(function (a, b) {
+              return (a.lastUsed || 0) - (b.lastUsed || 0);
+            });
+            var doomed = [];
+            while (exact > target && sorted.length) {
+              var record = sorted.shift();
+              exact -= record.bytes || 0;
+              doomed.push(record.key);
+            }
+            if (stats) stats.cacheEvict += doomed.length;
+            return removeKeys(doomed).then(function (removed) {
+              // Recompute from the same snapshot: exact after the deletes we
+              // just made, rather than "whatever the counter said before".
+              if (removed) totalBytes = Math.max(0, exact);
+              return removed;
+            });
+          })
+          .catch(function (error) {
+            warnOnce(error);
+            return 0; // a failed scan must not read as "the store is empty"
+          });
       });
     }
 
@@ -352,32 +509,54 @@
           return (a.lastUsed || 0) - (b.lastUsed || 0);
         });
         var count = Math.max(1, Math.floor(sorted.length * share));
-        var doomed = sorted.slice(0, count).map(function (record) {
+        var batch = sorted.slice(0, count);
+        var doomed = batch.map(function (record) {
           return record.key;
         });
+        var freed = 0;
+        for (var i = 0; i < batch.length; i += 1) freed += batch[i].bytes || 0;
         if (stats) stats.cacheEvict += doomed.length;
-        return removeKeys(doomed).then(function () {
+        return removeKeys(doomed).then(function (removed) {
+          // Keep the counter honest after a quota rescue; `evict` has the exact
+          // sizes in hand, so this is a recalibration, not an estimate.
+          if (removed && totalBytes !== null) totalBytes = Math.max(0, sumBytes(list) - freed);
           return true;
         });
       });
     }
 
     function clear() {
-      l1.clear();
-      if (!g.indexedDB) return Promise.resolve(false);
+      l1Clear();
+      if (!g.indexedDB) {
+        totalBytes = 0;
+        return Promise.resolve(false);
+      }
       return tx('readwrite', function (store) {
         store.clear();
         return true;
-      }).catch(function (error) {
-        warnOnce(error);
-        return false;
-      });
+      })
+        .then(function (cleared) {
+          if (cleared) totalBytes = 0;
+          return cleared;
+        })
+        .catch(function (error) {
+          warnOnce(error);
+          return false;
+        });
     }
 
     /** Uninstall path: remove the database itself, not just its records. */
     function dropDatabase() {
-      l1.clear();
-      if (!g.indexedDB) return Promise.resolve(false);
+      l1Clear();
+      if (!g.indexedDB) {
+        totalBytes = 0;
+        return Promise.resolve(false);
+      }
+      // The store this counter describes is about to stop existing: forget the
+      // total too, or the next put would gate against a number for a database
+      // that is gone (and never re-initialise, because the total was "known").
+      totalBytes = null;
+      totalPromise = null;
       var db = dbPromise;
       dbPromise = null;
       l2Available = null;
@@ -432,6 +611,12 @@
           (keys || []).forEach(function (key) {
             store.delete(key);
           });
+          if ((keys || []).length) {
+            // This path deletes by key and never sees the sizes; invalidating
+            // the counter costs one lazy re-read on the next write instead of a
+            // silently wrong total.
+            totalBytes = null;
+          }
           return (keys || []).length;
         });
       }).catch(function (error) {
@@ -473,6 +658,12 @@
       enforceCapacity: enforceCapacity,
       l1Size: function () {
         return l1.size;
+      },
+      l1Bytes: function () {
+        return l1Bytes;
+      },
+      l1BudgetBytes: function () {
+        return l1BudgetBytes;
       },
       isL2Available: function () {
         return l2Available;

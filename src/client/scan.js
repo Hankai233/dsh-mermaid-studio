@@ -102,6 +102,7 @@
         observer: null,
         candidates: new Set(),
         batchPending: false,
+        dropped: false,
         cards: new Map() // block -> blockRecord
       };
       record.observer = new g.MutationObserver(function (mutations) {
@@ -115,6 +116,11 @@
     function dropRoot(root) {
       var record = roots.get(root);
       if (!record) return;
+      // Mark first, and before the teardown below: an idle batch may already be
+      // queued for this root, and a dropped root must not resume scanning (or
+      // resurrect a card for a conversation that is gone).
+      record.dropped = true;
+      record.candidates.clear();
       record.observer.disconnect();
       record.cards.forEach(function (blockRecord) {
         disposeRecord(blockRecord);
@@ -176,9 +182,13 @@
       flush(record);
     }
 
-    function candidate(record, block) {
-      if (!block || !block.isConnected) return;
-      record.candidates.add(block);
+    /**
+     * The one idle hop: at most one flush is queued per root, so a burst of
+     * mutations (or one batch leaving work behind) costs one batch, not one
+     * flush per block.
+     */
+    function scheduleFlush(record) {
+      if (disposed || record.dropped) return;
       if (record.batchPending) return;
       record.batchPending = true;
       idle(function () {
@@ -187,19 +197,45 @@
       });
     }
 
+    function candidate(record, block) {
+      if (!block || !block.isConnected) return;
+      record.candidates.add(block);
+      scheduleFlush(record);
+    }
+
+    /**
+     * Drain the candidate set, BATCH_MAX at a time. Never `clear()` it.
+     *
+     * A root can arrive with every fence already in place — reload, session
+     * switch, a long conversation restored from the host — so `collectAll()`
+     * fills `candidates` in one go and flushes synchronously. The old
+     * `Array.from(...).slice(0, BATCH_MAX)` + `clear()` moved the first 20 into
+     * cards and *dropped the rest forever*: static history produces no further
+     * mutation, so diagram 21+ stayed a source block with no error and no
+     * counter. Now each candidate is deleted from the set *before* it is
+     * examined (the set therefore strictly shrinks — that is the loop guard,
+     * and `examine()` never re-adds a node), and whatever a batch leaves behind
+     * asks for another idle flush through the same `scheduleFlush` above.
+     */
     function flush(record) {
-      if (disposed) return;
-      var list = Array.from(record.candidates).slice(0, MMS.CONFIG.BATCH_MAX);
-      record.candidates.clear();
-      for (var i = 0; i < list.length; i += 1) {
+      if (disposed || record.dropped) return;
+      var budget = MMS.CONFIG.BATCH_MAX;
+      var examined = 0;
+      var pending = record.candidates.values();
+      var next = pending.next();
+      while (!next.done && examined < budget) {
+        record.candidates.delete(next.value);
+        examined += 1;
         try {
-          examine(record, list[i]);
+          examine(record, next.value);
         } catch (error) {
           app.stats.error('examine: ' + error.message);
         }
+        next = pending.next();
       }
       sweepOrphans(record);
       schedulePrerender();
+      if (record.candidates.size > 0) scheduleFlush(record);
     }
 
     // ── one candidate ──────────────────────────────────────────────────────
@@ -306,6 +342,8 @@
         key: key,
         source: fence.source,
         fence: fence,
+        /** Source whose SVG the card currently displays; null until injected. */
+        shownSource: null,
         visible: !io,
         dirty: false,
         job: null,
@@ -380,6 +418,27 @@
       decide(blockRecord);
     }
 
+    /**
+     * Whether the card is already showing a diagram of the *current* source.
+     *
+     * `showPending()` only flips `data-mms-state` to `pending`, and the skeleton
+     * is an overlay that CSS reveals for that state — the old SVG stays in the
+     * stage underneath (injection replaces it only on success). So calling it
+     * while a diagram is up paints a skeleton *on top of* that diagram: on a
+     * theme switch `rerenderAll` walks every card, and each one flashed
+     * "old figure + skeleton" until its new SVG landed. Keeping the current
+     * figure on screen until the replacement is injected is both quieter and
+     * more truthful: a cache hit usually arrives in the same frame and the SVG
+     * is swapped without ever hiding it.
+     */
+    function keepsShown(blockRecord) {
+      var card = blockRecord.card;
+      if (!card || card.state.phase !== 'ready') return false;
+      // Same source, possibly a different theme key: the displayed figure is
+      // still an honest stand-in for this fence until the new one is ready.
+      return blockRecord.shownSource === blockRecord.source;
+    }
+
     function decide(blockRecord) {
       if (disposed || !blockRecord.block.isConnected) return;
       var card = blockRecord.card;
@@ -396,7 +455,9 @@
       card.state.rejectedDirectives = !!blockRecord.fence.rejected;
       card.el.setAttribute('data-mms-key', key.slice(0, 16));
 
-      card.showPending();
+      // Only ask for the skeleton when there is nothing to show, or what is
+      // shown belongs to another source. See keepsShown().
+      if (!keepsShown(blockRecord)) card.showPending();
 
       // Negative cache: streaming output produces the same broken fence over and
       // over; without this the queue would re-render it every time. Manual retry
@@ -417,7 +478,10 @@
             var ok = card.showSvg(record.svg, record.renderId, {
               clamped: !!record.clamped
             });
-            if (ok) return;
+            if (ok) {
+              blockRecord.shownSource = blockRecord.source;
+              return;
+            }
           }
           enqueue(blockRecord, key, theme);
         })
@@ -475,7 +539,20 @@
      */
     var bgTimer = null;
     var bgInflight = null;
-    var bgAttempted = {};
+    /**
+     * Keys that already had a background attempt: an insertion-ordered set.
+     *
+     * Its job is dedupe inside a quiet window. Without it the scheduler keeps
+     * picking the same unrendered fence whose render just failed or was skipped,
+     * and the prerender loop spins on one diagram. The original was a plain
+     * object with no bound and one ~40-character key per distinct cache key
+     * (source × theme × scope × font × render config) for the life of the page,
+     * cleared only on dispose — a long session with theme switches reached five
+     * digits. Past the cap the oldest attempts are forgotten, which at worst
+     * costs one extra prerender of a diagram nobody has looked at in hours.
+     */
+    var BG_ATTEMPTED_MAX = 400;
+    var bgAttempted = new Map();
 
     function prerenderEnabled() {
       if (disposed || !MMS.CONFIG.PRERENDER) return false;
@@ -499,6 +576,23 @@
         return g.requestIdleCallback(fn, { timeout: MMS.CONFIG.PRERENDER_IDLE_TIMEOUT_MS });
       }
       return setTimeout(fn, 0);
+    }
+
+    /** Remember one attempt, dropping the oldest overflow past the cap. */
+    function noteAttempted(key) {
+      bgAttempted.set(key, true);
+      var overflow = bgAttempted.size - BG_ATTEMPTED_MAX;
+      if (overflow <= 0) return;
+      // Insertion order is age order. Evict exactly the overflow instead of
+      // clearing the set: a clear would re-prerender everything offscreen in one
+      // burst, which is the behaviour this gate exists to prevent.
+      var keys = bgAttempted.keys();
+      var next = keys.next();
+      while (overflow > 0 && !next.done) {
+        bgAttempted.delete(next.value);
+        overflow -= 1;
+        next = keys.next();
+      }
     }
 
     function cancelBackground() {
@@ -525,7 +619,7 @@
           if (!blockRecord.card || blockRecord.card.state.phase !== 'pending') return;
           if (!blockRecord.source) return;
           if (blockRecord.fence && blockRecord.fence.overLong) return;
-          if (bgAttempted[blockRecord.key]) return;
+          if (bgAttempted.has(blockRecord.key)) return;
           if (app.negative.get(blockRecord.key)) return;
           best = blockRecord;
         });
@@ -569,7 +663,7 @@
         if (!prerenderEnabled() || bgInflight || queueIsBusy()) return;
         if (app.activityAge() < MMS.CONFIG.PRERENDER_QUIET_MS) return;
         if (target.visible || !target.block.isConnected || target.job) return;
-        bgAttempted[target.key] = true;
+        noteAttempted(target.key);
         app.cache
           .get(target.key)
           .then(function (record) {
@@ -583,6 +677,41 @@
     }
 
     // ── outcomes from the queue ────────────────────────────────────────────
+    /**
+     * Negative-cache cap. The TTL is evaluated on read, so an entry that simply
+     * sits there is inert — but it is also never removed, and every distinct
+     * failed diagram (one per source × theme) left a permanent entry behind: the
+     * map grew with the number of broken fences a session ever produced.
+     * Pruning on write keeps the read-side TTL semantics untouched (an expired
+     * key is still ignored, so a retry is allowed) and only ever bounds memory.
+     */
+    var NEGATIVE_MAX = 200;
+
+    /** Store one negative entry, sweeping expired ones when the map is over cap. */
+    function noteNegative(key) {
+      var now = Date.now();
+      var ttl = MMS.CONFIG.NEGATIVE_TTL_MS;
+      app.negative.set(key, now);
+      if (app.negative.size <= NEGATIVE_MAX) return;
+      app.negative.forEach(function (at, entryKey) {
+        // Deleting the current entry inside forEach is allowed; an entry that
+        // is already expired can never block a retry, so dropping it is free.
+        if (!(now - at < ttl)) app.negative.delete(entryKey);
+      });
+      var overflow = app.negative.size - NEGATIVE_MAX;
+      if (overflow <= 0) return;
+      // Still over cap with nothing expired: drop the oldest writes. They expire
+      // soonest, and forgetting one only allows an *earlier* retry — never a
+      // dead end, which is the only property the TTL has to keep.
+      var keys = app.negative.keys();
+      var next = keys.next();
+      while (overflow > 0 && !next.done) {
+        app.negative.delete(next.value);
+        overflow -= 1;
+        next = keys.next();
+      }
+    }
+
     function onOutcome(outcome) {
       if (disposed) return;
       if (outcome.type === 'breaker') {
@@ -626,6 +755,7 @@
           app.stats.error('injection rejected');
           return;
         }
+        target.shownSource = target.source;
         var svg = target.card.getSvg();
         if (svg) {
           try {
@@ -661,7 +791,7 @@
           return;
         }
         target.card.showError('渲染失败', true, message);
-        app.negative.set(target.key, Date.now());
+        noteNegative(target.key);
         return;
       }
     }
@@ -702,7 +832,7 @@
       if (offQuiet) offQuiet();
       if (offActivity) offActivity();
       bgInflight = null;
-      bgAttempted = {};
+      bgAttempted.clear();
       roots.forEach(function (record, root) {
         dropRoot(root);
       });
@@ -762,7 +892,7 @@
           enabled: prerenderEnabled(),
           scheduled: bgTimer !== null,
           inflight: bgInflight,
-          attempted: Object.keys(bgAttempted).length
+          attempted: bgAttempted.size
         };
       },
       rerenderCard: function (card) {
