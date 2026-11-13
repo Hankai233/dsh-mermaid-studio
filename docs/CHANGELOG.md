@@ -37,13 +37,13 @@
 | 2026-11-12 当前 | 修复 / 性能 / 文档 | 缓存键哨兵改整值判据、≥21 个围栏分批消费、缓存容量增量记账（工作区，未提交）；本文件加时间线 | — |
 | 2026-11-12 20:30 | 修复 / 性能 / 变更 / 测试 | 第二轮：指令剥离爆栈、断路器出口、L1 字节预算、localStorage 全键扫描、sanitize 定位属性收紧、两处无界 Map、松手仍平移、切主题叠影；测试 39 → 86 条（`6011743`） | `6011743` |
 | 2026-11-13 13:30 | 测试 / 修复 | 真实浏览器通道打通（playwright-core + 全量 harness 32/32）；浏览器用例揪出既有缺陷「中文 subgraph 标题被 id 白名单误杀」，并发现 #4/#21 两条旧用例把 bug 行为写成了契约 | `6011743` |
-| 2026-11-13 14:20 | 文档 | README 中英按 `AGENTS.md` 第 5 节收窄（去掉性能、开发与 Limits，部署合成三条路） | — |
+| 2026-11-13 14:20 | 文档 | README 中英按 `AGENTS.md` 第 5 节收窄（去掉性能、开发与 Limits，部署合成三条路） | `ccc05c6` |
 
 ## [未发布]
 
 ### 文档
 
-- 2026-11-13 · **README 收窄到 `AGENTS.md` 第 5 节的白名单内容（中英双版）。** 删掉「性能相关的三个机制」「怎么自己判断快慢」两节与英文版的 `Limits` 段：性能数字和调试台账属于本文件与代码注释，放进 README 会让首页变成性能报告；删掉「开发」一节，`npm run build` / `npm test` 的用法在第 2 节和 CI 里已经有约束。部署改成三条路：dsh desktop 输入包名安装（插件页 → 添加插件 → 安装第三方插件 → `@hankai233/dsh-mermaid-studio`）、从源代码构建后按本地目录装、让 Agent 构建安装；装后校验，以及与 `dsh-mermaid-smooth` 的冲突提示，也不进 README，白名单里没有这两项。顺带修掉 Agent 提示里的旧写法 —— 原先让人手改 `profile/package.json` 的 `dsh.profile.bundles`，且那里写的是短名 `dsh-mermaid-studio`，与 `package.json` 的 scoped 包名和第 3 节的注册 ID 不一致；现在改走插件页或 `plugin_manager install_bundle`，两边都对得上。（`README.md`、`README.en.md`）
+- 2026-11-13 · **README 收窄到 `AGENTS.md` 第 5 节的白名单内容（中英双版）。** 删掉「性能相关的三个机制」「怎么自己判断快慢」两节与英文版的 `Limits` 段：性能数字和调试台账属于本文件与代码注释，放进 README 会让首页变成性能报告；删掉「开发」一节，`npm run build` / `npm test` 的用法在第 2 节和 CI 里已经有约束。部署改成三条路：dsh desktop 输入包名安装（插件页 → 添加插件 → 安装第三方插件 → `@hankai233/dsh-mermaid-studio`）、从源代码构建后按本地目录装、让 Agent 构建安装；装后校验，以及与 `dsh-mermaid-smooth` 的冲突提示，也不进 README，白名单里没有这两项。顺带修掉 Agent 提示里的旧写法 —— 原先让人手改 `profile/package.json` 的 `dsh.profile.bundles`，且那里写的是短名 `dsh-mermaid-studio`，与 `package.json` 的 scoped 包名和第 3 节的注册 ID 不一致；现在改走插件页或 `plugin_manager install_bundle`，两边都对得上。（`ccc05c6`，`README.md`、`README.en.md`）
 
 ## 0.1.1 - 2026-11-13
 
