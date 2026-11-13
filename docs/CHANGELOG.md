@@ -40,6 +40,13 @@
 | 2026-11-13 14:20 | 文档 | README 中英按 `AGENTS.md` 第 5 节收窄（去掉性能、开发与 Limits，部署合成三条路） | `ccc05c6` |
 | 2026-11-13 20:12 | 图标 | 换成时序线图标（64 网格），并补上 `package.json` 的 `icon` 字段 —— 此前插件页读不到本包图标；1024 深浅双版存进 `assets/icons/` | `4b7f815` |
 | 2026-11-13 20:55 | 发布 | 0.2.0 发布到 npm（GitHub Actions，推送 tag `v0.2.0` 触发）；包内含新图标与 `assets/icons/` | `4b7f815` |
+| 2026-11-13 21:06 | CI | publish 工作流的 checkout / setup-node 升到 v5（v4 仍以 Node 20 为目标，GitHub 已强制 Node 24） | — |
+
+## [未发布]
+
+### 变更
+
+- 2026-11-13 · **publish 工作流的 `actions/checkout` 与 `actions/setup-node` 从 v4 升到 v5。** 0.2.0 那次运行带了告警「Node.js 20 is deprecated…forced to run on Node.js 24」—— v4 系列的 action 仍以 Node 20 为目标，靠 runner 强制抬到 24 才跑起来；v5 自身就跑在 Node 24 上，告警随之消失。`node-version` 仍显式钉在 24、构建与测试步骤一字未动，所以这次只动 workflow。（`.github/workflows/npm-publish.yml`）
 
 ## 0.2.0 - 2026-11-13
 
