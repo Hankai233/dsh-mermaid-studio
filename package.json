@@ -6,6 +6,7 @@
   "author": "Hanka",
   "type": "module",
   "main": "./lib/index.js",
+  "icon": "./icon.svg",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
@@ -15,6 +16,7 @@
     "lib",
     "cordis.patch.yml",
     "icon.svg",
+    "assets",
     "README.md",
     "README.en.md",
     "LICENSE",

@@ -1,7 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="2.5" y="3.5" width="19" height="17" rx="3" />
-  <circle cx="7" cy="9" r="1.6" />
-  <circle cx="17" cy="15" r="1.6" />
-  <path d="M8.4 10.3 14.8 13.9" />
-  <path d="M6.5 17h5" />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" role="img">
+  <title>dsh-mermaid-studio</title>
+  <!-- 时序线：三条生命线、一条消息、一条虚线回程。
+       插件列表（DSH 插件页）把这张图当 <img> 渲染到 30–40px，且深浅两套主题共用同一个文件，
+       所以：线宽取 3.5（缩到 30px 还剩 1.6px），方框 10，并把 1024 版里的第二枚箭头省掉；
+       颜色取 #3d6bff —— 白色面上 4.2:1、深色面上 3.8:1，一档颜色两边都站得住。
+       1024 的深浅双版（#002fa7 / #5b7bff）在 assets/icons/，给 README 与宣发用。 -->
+  <g fill="#3d6bff">
+    <rect x="11" y="9" width="10" height="10"/>
+    <rect x="27" y="9" width="10" height="10"/>
+    <rect x="43" y="9" width="10" height="10"/>
+  </g>
+  <g stroke="#3d6bff" stroke-width="3.5">
+    <path d="M16 19V55"/>
+    <path d="M32 19V55"/>
+    <path d="M48 19V55"/>
+  </g>
+  <path d="M16 29H43" stroke="#3d6bff" stroke-width="3.5"/>
+  <path d="M42 23.5 51 29 42 34.5Z" fill="#3d6bff"/>
+  <path d="M48 43H34" stroke="#3d6bff" stroke-width="3.5" stroke-dasharray="5 4"/>
 </svg>

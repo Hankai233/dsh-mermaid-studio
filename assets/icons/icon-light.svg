@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img">
+  <title>dsh-mermaid-studio</title>
+  <!-- 透明底 · 浅色面：只留 IKB 笔迹 #002FA7，底色交给承载它的界面
+       时序线：三条生命线，一条发出、一条返回。几何对齐 64px 网格，安全边距 160px。 -->
+  <g stroke="#002fa7" stroke-width="28">
+    <path d="M256 320V848"/>
+    <path d="M512 320V848"/>
+    <path d="M768 320V848"/>
+  </g>
+
+  <g fill="#002fa7">
+    <rect x="184" y="176" width="144" height="144"/>
+    <rect x="440" y="176" width="144" height="144"/>
+    <rect x="696" y="176" width="144" height="144"/>
+  </g>
+
+  <g stroke="#002fa7" stroke-width="36">
+    <path d="M256 464H712"/>
+    <path d="M760 656H588" stroke-dasharray="64 40"/>
+  </g>
+
+  <g fill="#002fa7">
+    <path d="M700 426 768 464 700 502Z"/>
+    <path d="M580 620 512 656 580 692Z"/>
+  </g>
+</svg>

@@ -38,8 +38,13 @@
 | 2026-11-12 20:30 | 修复 / 性能 / 变更 / 测试 | 第二轮：指令剥离爆栈、断路器出口、L1 字节预算、localStorage 全键扫描、sanitize 定位属性收紧、两处无界 Map、松手仍平移、切主题叠影；测试 39 → 86 条（`6011743`） | `6011743` |
 | 2026-11-13 13:30 | 测试 / 修复 | 真实浏览器通道打通（playwright-core + 全量 harness 32/32）；浏览器用例揪出既有缺陷「中文 subgraph 标题被 id 白名单误杀」，并发现 #4/#21 两条旧用例把 bug 行为写成了契约 | `6011743` |
 | 2026-11-13 14:20 | 文档 | README 中英按 `AGENTS.md` 第 5 节收窄（去掉性能、开发与 Limits，部署合成三条路） | `ccc05c6` |
+| 2026-11-13 20:12 | 图标 | 换成时序线图标（64 网格），并补上 `package.json` 的 `icon` 字段 —— 此前插件页读不到本包图标；1024 深浅双版存进 `assets/icons/` | — |
 
 ## [未发布]
+
+### 新增
+
+- 2026-11-13 · **换成时序线图标，并补上 `package.json` 里一直缺的 `icon` 字段 —— 这个字段不在，插件页根本读不到本包的图标。** 宿主插件页（`dsh-client-ui-plugin-manager`）用 `PackageArtwork` 把 `pkg.meta.icon` 当 `<img src>` 渲染：行内 30px、卡片 36px，外面套 `.rowIcon` 的 0.5px 边框；`meta.icon` 由 `package.json` 顶层 `icon` 字段解析（内置插件都这么写，如 `dsh-experimental-inspector` 的 `"icon": "./icon.svg"`），而本包此前只有 `files` 里的 `icon.svg`、没有 `icon` 字段，所以旧图标不会被任何界面读到。新 `icon.svg` 按 64 网格重画：三条生命线 + 一条消息 + 一条虚线回程，线宽 3.5、方框 10（缩到 30px 还剩 1.6px 笔画），并省掉 1024 版的第二枚箭头（30px 下两枚箭头只会糊成一片）；颜色取 `#3d6bff`，白色面上 4.2:1、深色面上 3.8:1 —— `<img>` 渲染拿不到 `currentColor`，旧文件里的 `stroke="currentColor"` 实际会被解析成黑色，所以深浅两个主题只能用一档中间色，而不是继承。`assets/icons/` 另存 1024 的深浅双版（`#002fa7` / `#5b7bff`，透明底）给 README 与宣发用，`files` 加上 `assets`。（`icon.svg`、`package.json`、`assets/icons/`）
 
 ### 文档
 
