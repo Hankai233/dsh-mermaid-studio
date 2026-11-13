@@ -40,9 +40,11 @@
 | 2026-11-13 14:20 | 文档 | README 中英按 `AGENTS.md` 第 5 节收窄（去掉性能、开发与 Limits，部署合成三条路） | `ccc05c6` |
 | 2026-11-13 20:12 | 图标 | 换成时序线图标（64 网格），并补上 `package.json` 的 `icon` 字段 —— 此前插件页读不到本包图标；1024 深浅双版存进 `assets/icons/` | `4b7f815` |
 | 2026-11-13 20:55 | 发布 | 0.2.0 发布到 npm（GitHub Actions，推送 tag `v0.2.0` 触发）；包内含新图标与 `assets/icons/` | `4b7f815` |
-| 2026-11-13 21:06 | CI | publish 工作流的 checkout / setup-node 升到 v5（v4 仍以 Node 20 为目标，GitHub 已强制 Node 24） | — |
+| 2026-11-13 21:06 | CI | publish 工作流的 checkout / setup-node 升到 v5（v4 仍以 Node 20 为目标，GitHub 已强制 Node 24）；0.2.1 发到 npm（tag `v0.2.1`） | `ad8f139` |
 
-## [未发布]
+## 0.2.1 - 2026-11-13
+
+只有 CI 动过：publish 工作流的 `actions/checkout` 与 `actions/setup-node` 从 v4 升到 v5，消掉 0.2.0 那次运行里的 Node 20 弃用告警。插件代码、构建产物与包内容与 0.2.0 一致。
 
 ### 变更
 
