@@ -1,6 +1,6 @@
 {
   "name": "@hankai233/dsh-mermaid-studio",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "DSH 插件：对话里的 mermaid 围栏实时渲染成图，可缩放、全屏、导出 SVG，渲染结果本地缓存，切回来不重画。",
   "license": "GPL-3.0-or-later",
   "author": "Hanka",
