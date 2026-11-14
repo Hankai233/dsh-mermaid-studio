@@ -46,6 +46,13 @@
 | 2026-11-14 12:30 | 文档 | README 图标从标题上方挪到标题下方居中 | `02353ff` |
 | 2026-11-14 12:40 | 文档 | 提交身份改成 `KaiHan <hankai233@outlook.com>`，重写本轮 4 个已推送提交并强推；规则进 AGENTS.md 第 6 节 | `9233f01` |
 | 2026-11-14 12:50 | 发布 | 0.2.2 发到 npm（推送 tag `v0.2.2` 触发 GitHub Actions） | `becaf82` |
+| 2026-11-14 17:05 | 修复 | 清掉身份事故的残留：文档不再写错误身份的字面值、不再引用强推后作废的旧提交号，本机 reflog 与不可达对象一并清掉 | — |
+
+## [未发布]
+
+### 修复
+
+- 2026-11-14 · **清掉身份事故的残留，三处一起收。** ① 文档里不再写那个错误身份的字面值，只写清规则的成败：规则该记的是「不许用 `-c` 临时覆盖身份」，那个假地址留在文档里除了散布它没有任何作用。② `0.2.2` 的记录里引用了 4 个强推后已作废的旧提交号，GitHub 已不保留这些对象，写进记录就是死链 —— 改成描述换号这件事本身，不再指名旧号。③ 本机 reflog 与不可达对象仍留着那 4 个旧提交（`git log --reflog` 还查得到），已 `reflog expire --expire=now --all` + `gc --prune=now` 清掉，本机任何 git 视图都不会再显示那个作者。（`AGENTS.md`、`docs/CHANGELOG.md`）
 
 ## 0.2.2 - 2026-11-14
 
@@ -55,7 +62,7 @@
 
 - 2026-11-13 · **README 顶部加插件图标（中英双版），用 `<picture>` 跟随深浅主题。** GitHub 支持按 `prefers-color-scheme` 切 `<source>`：深色主题取 `assets/icons/icon-dark.svg`（`#5b7bff`），浅色取 `icon-light.svg`（`#002fa7`）—— 单张透明图在 GitHub 深色底上只有 1.8:1，等于看不见；`<img>` 保留作降级，npm 这类不解析 `<picture>` 的渲染器仍会显示浅色版。图标与插件页那张 64 网格的 `icon.svg` 同源，只是走 1024 的矢量版。（`README.md`、`README.en.md`）
 - 2026-11-14 · **图标从标题上挪到标题下并居中。** 压在标题上面时，仓库页第一眼是一片空白加一张小图，标题被推到下面；改成「标题 → 居中图标 → 一句话简介」，`<p align="center">` 包住 `<picture>`，深浅两套的降级路径不变。（`README.md`、`README.en.md`）（`02353ff`）
-- 2026-11-14 · **提交身份修正为 `KaiHan <hankai233@outlook.com>`，规则写进 `AGENTS.md` 第 6 节。** 本轮改动里 agent 用 `git -c user.name/user.email` 临时覆盖了身份，把 4 个已推送的提交写成 `Hanka <hanka@users.noreply.github.com>` —— 那个 noreply 地址不是账号的有效形式，GitHub 不会把这些提交归到账号上，贡献图也不计。已用 `git filter-branch --env-filter` 重写这 4 个提交（`2fbf2d4`→`becaf82`、`98819e6`→`367a451`、`5d1694f`→`02353ff`、`7e2dc26`→`25a5c98`）并强推，本文件引用旧号的 7 处一并改掉；仓库本地 `user.name` / `user.email` 已设成这个身份。（`AGENTS.md`、`docs/CHANGELOG.md`）
+- 2026-11-14 · **提交身份修正为 `KaiHan <hankai233@outlook.com>`，规则写进 `AGENTS.md` 第 6 节。** 本轮改动里 agent 用 `git -c user.name/user.email` 临时覆盖了身份，写进去的是一个不属于本账号的 `noreply` 地址 —— GitHub 按邮箱归因，那 4 个已推送的提交因此成了未关联作者，贡献也不计。已用 `git filter-branch --env-filter` 重写这 4 个提交（换号后强推，旧号作废），本文件里引用旧号的 7 处一并改成新号；仓库本地 `user.name` / `user.email` 已设成这个身份。（`AGENTS.md`、`docs/CHANGELOG.md`）
 
 ### 性能
 
