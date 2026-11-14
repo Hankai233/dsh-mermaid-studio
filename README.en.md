@@ -1,9 +1,11 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/icons/icon-dark.svg">
-  <img src="assets/icons/icon-light.svg" width="96" height="96" alt="dsh-mermaid-studio">
-</picture>
-
 # dsh-mermaid-studio
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/icons/icon-dark.svg">
+    <img src="assets/icons/icon-light.svg" width="96" height="96" alt="dsh-mermaid-studio">
+  </picture>
+</p>
 
 A DeepSeek Harness plugin that renders mermaid fences in the conversation as diagrams. Zoom, go fullscreen, export SVG. Renders stay on your machine, so returning to the same diagram does not redraw it.
 
