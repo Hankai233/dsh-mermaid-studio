@@ -506,6 +506,12 @@
         renderId: app.nextRenderId(blockRecord.uid),
         fontFamily: app.fontFamily(blockRecord.block),
         superseded: false,
+        // "排队中" until the queue hands this job the slot. With pacing between
+        // renders there is now a wait the reader can actually see, so the two
+        // words have to mean two different things.
+        onStart: function () {
+          if (blockRecord.card) blockRecord.card.showRendering();
+        },
         stale: function () {
           return job.superseded || !blockRecord.block.isConnected;
         }

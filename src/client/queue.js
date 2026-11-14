@@ -1,6 +1,6 @@
 /* ── queue.js — serial render queue with an escape hatch ────────────────────
  *
- * Concurrency is 1 because `mermaid.initialize()` is global config. Two things
+ * Concurrency is 1 because `mermaid.initialize()` is global config. Three things
  * make a serial queue safe to ship:
  *
  *   1. A timeout changes the card's state but does NOT free the slot. Freeing it
@@ -10,6 +10,11 @@
  *      abandoning the engine instance (`renderer.reset()`) instead of by
  *      waiting. Without this, one pathological diagram disables the plugin for
  *      the rest of the session.
+ *   3. Consecutive jobs are separated by `cooldownMs`. Serialising was never
+ *      enough on its own: a render is a synchronous main-thread block, so
+ *      `finish()` starting the next job in the same task turns N diagrams into
+ *      one N-times-longer freeze. The gap is where the browser paints and takes
+ *      input between them.
  *
  * Two consecutive timeouts open a breaker: consuming further jobs would stack
  * timeout cards and blank slots, so the queue stops and the UI offers a reset.
@@ -28,6 +33,12 @@
     var running = null;
     var breakerOpen = false;
     var consecutiveTimeouts = 0;
+    /** When the last render settled; pump() waits `cooldownMs` after it. */
+    var lastEndedAt = -Infinity;
+    var pumpTimer = null;
+    var cooldownMs = options.cooldownMs === undefined ? MMS.CONFIG.RENDER_COOLDOWN_MS : options.cooldownMs;
+    /** How long the last render blocked the main thread; the gap scales with it. */
+    var lastDurationMs = 0;
     /**
      * Recent [start, end] windows of this queue's own renders. The long-task
      * observer (index.js) has no other way to tell a block caused by a mermaid
@@ -131,6 +142,8 @@
         clearTimeout(abandonTimer);
         running = null;
         closeWindow(now());
+        lastEndedAt = now();
+        lastDurationMs = lastEndedAt - startedAt;
         if (kind === 'ready') {
           noteSuccess();
           // The one place a render duration is measured: after the promise
@@ -138,7 +151,7 @@
           // ledger has no samples and every "it is slow" report is a guess.
           if (stats && typeof stats.noteRender === 'function') {
             var source = job.source || '';
-            stats.noteRender(now() - startedAt, {
+            stats.noteRender(lastDurationMs, {
               lines: source ? source.split('\n').length : 0,
               chars: source.length,
               background: !!job.background
@@ -176,6 +189,7 @@
         // open window and is a no-op once none is open, so the normal path
         // (finish() closed it, settled is true, we return above) is untouched.
         closeWindow(now());
+        lastEndedAt = now();
         pump();
       }
 
@@ -232,6 +246,32 @@
       );
     }
 
+    /**
+     * Start the next job after a real pause, never stacked on top of the last
+     * one. One pending timer at a time: `push()` calls pump() on every new job,
+     * and re-arming here would keep pushing the start further out.
+     */
+    function deferPump(delay) {
+      if (pumpTimer !== null) return;
+      pumpTimer = setTimeout(function () {
+        pumpTimer = null;
+        pump();
+      }, delay);
+    }
+
+    /**
+     * How long to stay quiet after a render that took `duration` ms.
+     *
+     * The point is a paintable frame plus room for pending input, not a fixed
+     * tax: a 17 ms diagram with a 120 ms silence made a dozen small diagrams
+     * take four times as long for nothing (measured: 486 ms → 1901 ms). A
+     * heavy diagram is worth the full cooldown because it is the one that
+     * actually froze the page.
+     */
+    function cooldownFor(duration) {
+      return Math.min(cooldownMs, Math.max(MMS.CONFIG.MIN_RENDER_GAP_MS, duration || 0));
+    }
+
     function pump() {
       if (breakerOpen) {
         // Whichever path opened the breaker, nothing may stay parked behind it.
@@ -239,6 +279,15 @@
         return;
       }
       if (running || pending.length === 0) return;
+      // The cooldown. Renders cannot run in parallel (mermaid.initialize is
+      // global), but they also must not run back to back: see
+      // RENDER_COOLDOWN_MS. The delay applies only *between* jobs, so a single
+      // diagram still starts the moment it is asked for.
+      var wait = lastEndedAt + cooldownFor(lastDurationMs) - now();
+      if (wait > 0) {
+        deferPump(wait);
+        return;
+      }
       var job = pending.shift();
       if (job && job.stale && job.stale()) {
         pump();
@@ -302,6 +351,11 @@
       breakerOpen = false;
       consecutiveTimeouts = 0;
       pending = [];
+      if (pumpTimer !== null) {
+        clearTimeout(pumpTimer);
+        pumpTimer = null;
+      }
+      lastEndedAt = -Infinity;
       if (stats) stats.queueBreaker = 0;
       renderer.reset();
     }
@@ -332,7 +386,8 @@
       isBusy: function () {
         return !!running;
       },
-      timeoutMs: timeoutMs
+      timeoutMs: timeoutMs,
+      cooldownMs: cooldownMs
     };
   }
 

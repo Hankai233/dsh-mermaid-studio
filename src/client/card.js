@@ -135,6 +135,9 @@
     viewport.setAttribute('aria-label', '图表画布：Ctrl 滚轮缩放，拖拽平移，双击适应');
     var stage = el('div', 'mms-stage');
     var skeleton = el('div', 'mms-skeleton');
+    // The mask carries the wording; CSS renders it through ::after so the state
+    // changing never costs a DOM node.
+    skeleton.setAttribute('data-label', '排队中');
     skeleton.appendChild(el('span'));
     skeleton.appendChild(el('span'));
     skeleton.appendChild(el('span'));
@@ -411,6 +414,12 @@
       showError: showError,
       showOverLong: showOverLong,
       showPending: function () {
+        skeleton.setAttribute('data-label', '排队中');
+        setPhase('pending');
+      },
+      /** This card's own job just left the queue and started rendering. */
+      showRendering: function () {
+        skeleton.setAttribute('data-label', '渲染中');
         setPhase('pending');
       },
       flash: flash,

@@ -44,8 +44,9 @@
     '.mms-stage > svg{display:block;max-width:none!important;height:auto}',
     '.mms-card[data-view="code"] .mms-vp{display:none}',
 
-    /* skeleton / pending */
-    '.mms-skeleton{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:16px}',
+    /* skeleton / pending: one mask for the whole card, with a status word in it */
+    '.mms-skeleton{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:16px;background:var(--mms-bg)}',
+    '.mms-skeleton::after{content:attr(data-label);font:var(--dsw-font-xxxs-11,11px/1.4 inherit);color:var(--mms-label-2)}',
     '.mms-card[data-mms-state="ready"] .mms-skeleton,.mms-card[data-mms-state="error"] .mms-skeleton{display:none}',
     '.mms-skeleton span{display:block;height:9px;border-radius:5px;background:var(--mms-bg-2);animation:mms-pulse 1.4s ease-in-out infinite}',
     '.mms-skeleton span:nth-child(1){width:min(320px,70%)}',
@@ -54,6 +55,11 @@
     '@keyframes mms-pulse{0%,100%{opacity:.45}50%{opacity:1}}',
     '.mms-skeleton[data-sized="1"]{padding:0}',
     '.mms-skeleton[data-sized="1"] span{display:none}',
+    /* A remembered box hides the three bars, so it gets its own activity: a slow
+       sweep across the reserved area. Without it a card waiting its turn is an
+       empty rectangle and reads as broken, not as busy. */
+    '.mms-skeleton[data-sized="1"]{background-image:linear-gradient(90deg,transparent 0%,var(--mms-bg-2) 50%,transparent 100%);background-size:220% 100%;background-repeat:no-repeat;animation:mms-sweep 1.6s linear infinite}',
+    '@keyframes mms-sweep{0%{background-position:140% 0}100%{background-position:-140% 0}}',
 
     /* error */
     '.mms-error{position:absolute;inset:0;display:none;flex-direction:column;gap:8px;padding:12px;overflow:auto;background:var(--mms-bg)}',
@@ -83,7 +89,7 @@
     '.mms-card[data-view="code"] .mms-float{position:static;margin:0 0 2px;opacity:1;transform:none;pointer-events:auto;justify-content:flex-end;border:0;background:transparent;box-shadow:none;padding:0 2px}',
     '.mms-card[data-view="code"] .mms-error{display:none}',
 
-    '@media (prefers-reduced-motion:reduce){.mms-skeleton span{animation:none}[data-mms-overlay]{backdrop-filter:none}}'
+    '@media (prefers-reduced-motion:reduce){.mms-skeleton span{animation:none}.mms-skeleton[data-sized="1"]{animation:none}[data-mms-overlay]{backdrop-filter:none}}'
   ].join('\n');
 
   function mountStyles() {

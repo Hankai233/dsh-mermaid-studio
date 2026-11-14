@@ -54,6 +54,23 @@
     SKELETON_MAX_PX: 420,
     SKELETON_PER_LINE_PX: 34,
     RENDER_TIMEOUT_MS: 15000,
+    /**
+     * Quiet time between two renders. Concurrency 1 protects the global config,
+     * but it does not make the browser able to paint: a render is a synchronous
+     * main-thread block, and `finish()` used to start the next one in the same
+     * task. Measured with 8 complex diagrams (qa/probe-freeze.mjs): 2129 ms of
+     * long tasks in a 2219 ms burst — 96% of the time the page could not paint
+     * or take input. This gap is what turns one 2.2 s freeze into eight visible
+     * steps.
+     */
+    RENDER_COOLDOWN_MS: 120,
+    /**
+     * Floor for that gap. A 17 ms diagram does not need 120 ms of silence — it
+     * needs one frame, so the pause scales with the render that just finished
+     * and only a heavy one is worth the full cooldown. Two frames: below that
+     * the browser has no room to paint at all.
+     */
+    MIN_RENDER_GAP_MS: 32,
     NEGATIVE_TTL_MS: 300000,
     STREAM_DEBOUNCE_MS: 300,
     BATCH_MAX: 20,

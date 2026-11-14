@@ -59,6 +59,7 @@ test('a foreground render overtakes every queued background render', async () =>
     },
     stats,
     timeoutMs: 50,
+    cooldownMs: 0, // ordering, not pacing: see the cooldown test below
     onOutcome: () => {}
   });
 
@@ -96,6 +97,7 @@ test('a background timeout does not feed the breaker', async () => {
     renderer: { render: () => new Promise(() => {}), reset: () => {} },
     stats,
     timeoutMs: 5,
+    cooldownMs: 0, // isolate the timeout→breaker path from pacing
     onOutcome: (outcome) => outcomes.push(outcome)
   });
   queue.push({ uid: 'bg-1', background: true, source: 'a' });
@@ -117,6 +119,72 @@ test('a finished render lands in the perf ledger', async () => {
   await delay(5);
   assert.equal(stats.renderMs.length, 1);
   assert.equal(stats.renderLastLines, 2);
+});
+
+/**
+ * Concurrency 1 stops two renders fighting over `mermaid.initialize()`, but it
+ * does not by itself stop the next one starting inside the same task — and a
+ * render is a synchronous main-thread block, so that is the whole difference
+ * between "N diagrams" and "one N-times-longer freeze".
+ */
+test('consecutive renders are separated by the cooldown, the first is not delayed', async () => {
+  const { MMS, stats } = await loadQueue();
+  const starts = [];
+  const queue = MMS.createQueue({
+    renderer: {
+      render: () => {
+        starts.push(Date.now());
+        // A render that blocks as long as a real mid-size diagram, so the
+        // adaptive gap is the full cooldown and not the floor.
+        return delay(60).then(() => ({ svg: '<svg/>' }));
+      },
+      reset: () => {}
+    },
+    stats,
+    cooldownMs: 40,
+    onOutcome: () => {}
+  });
+
+  const t0 = Date.now();
+  queue.push({ uid: 'fg-1', source: 'a-->b' });
+  await delay(5);
+  assert.equal(starts.length, 1, 'the first render starts synchronously');
+  assert.ok(starts[0] - t0 < 30, 'a single diagram must not wait for the cooldown, got ' + (starts[0] - t0));
+
+  queue.push({ uid: 'fg-2', source: 'a-->b' });
+  queue.push({ uid: 'fg-3', source: 'a-->b' });
+  await delay(400);
+  assert.equal(starts.length, 3, 'every queued job still runs');
+  const gap1 = starts[1] - starts[0];
+  const gap2 = starts[2] - starts[1];
+  assert.ok(gap1 >= 80, 'the next render waits out the cooldown, got ' + gap1);
+  assert.ok(gap2 >= 80, 'and so does the one after it, got ' + gap2);
+});
+
+test('a fast render gets a paintable frame, not the whole cooldown', async () => {
+  const { MMS, stats } = await loadQueue();
+  const starts = [];
+  const queue = MMS.createQueue({
+    renderer: {
+      render: () => {
+        starts.push(Date.now());
+        return Promise.resolve({ svg: '<svg/>' });
+      },
+      reset: () => {}
+    },
+    stats,
+    cooldownMs: 250,
+    onOutcome: () => {}
+  });
+
+  queue.push({ uid: 'fg-1', source: 'a-->b' });
+  queue.push({ uid: 'fg-2', source: 'a-->b' });
+  await delay(300);
+  assert.equal(starts.length, 2);
+  // ~17 ms render: the gap is MIN_RENDER_GAP_MS, nowhere near the 250 ms cap.
+  const gap = starts[1] - starts[0];
+  assert.ok(gap >= 25, 'at least one frame must be given back, got ' + gap);
+  assert.ok(gap <= 120, 'a cheap diagram must not pay the full cooldown, got ' + gap);
 });
 
 test('cache writes are refused while a webfont is still settling', async () => {
