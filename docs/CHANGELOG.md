@@ -52,7 +52,7 @@
 
 ### 修复
 
-- 2026-11-14 · **清掉身份事故的残留，三处一起收。** ① 文档里不再写那个错误身份的字面值，只写清规则的成败：规则该记的是「不许用 `-c` 临时覆盖身份」，那个假地址留在文档里除了散布它没有任何作用。② `0.2.2` 的记录里引用了 4 个强推后已作废的旧提交号，GitHub 已不保留这些对象，写进记录就是死链 —— 改成描述换号这件事本身，不再指名旧号。③ 本机 reflog 与不可达对象仍留着那 4 个旧提交（`git log --reflog` 还查得到），已 `reflog expire --expire=now --all` + `gc --prune=now` 清掉，本机任何 git 视图都不会再显示那个作者。（`AGENTS.md`、`docs/CHANGELOG.md`）（`a9edbfa`）
+- 2026-11-14 · **清掉身份事故的残留，四处一起收。** ① 文档里不再写那个错误身份的字面值，只写清规则的成败：规则该记的是「不许用 `-c` 临时覆盖身份」，那个假地址留在文档里除了散布它没有任何作用。② `0.2.2` 的记录里引用了 4 个旧提交号：强推后它们已不在任何分支上，但 GitHub **仍能按 SHA 取到**（不可达对象不会立即回收），写进记录既指不到历史、又给那个错误身份多留一处入口 —— 改成描述换号这件事本身，不再指名旧号。③ 本机 reflog 与不可达对象仍留着那 4 个旧提交（`git log --reflog` 还查得到），已 `reflog expire --expire=now --all` + `gc --prune=now` 清掉，本机任何 git 视图都不会再显示那个作者。④ 需要留档的真实状态：那 4 个提交在 GitHub 上是**不可达但仍可取到**的对象，且被归到真实账号 `hanka`（显示名 Hanna Seweryn），所以仓库侧栏的 Contributors 仍会显示 2 个人 —— 默认分支、`/graphs/contributors`、`contributors` API 都只有 1 个（Hankai233）。客户端无法回收这些对象，彻底清除只能请 GitHub Support 处理（或等其内部 GC，不保证）。**教训**：`git fetch origin <sha>` 失败不代表对象在 GitHub 上不存在，那个判断是错的，正确做法是查 `repos/{owner}/{repo}/commits/{sha}`。（`AGENTS.md`、`docs/CHANGELOG.md`）（`a9edbfa`）
 
 ## 0.2.2 - 2026-11-14
 
