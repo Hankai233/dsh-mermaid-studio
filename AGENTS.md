@@ -37,3 +37,13 @@ README应仅包含以下内容：
 - 部署方案：从源代码构建、AGENT帮忙构建、dsh desktop中输入包名安装
 - CHANGELOG入口
 - 开源协议
+
+## 6. 提交身份固定
+
+**规则：本仓库的提交身份一律是 `KaiHan <hankai233@outlook.com>`。不许在命令里用 `git -c user.name=… -c user.email=…` 临时覆盖它。**
+
+- 仓库已设本地 `user.name` / `user.email`；提交后 `git log -1 --format='%an <%ae>'` 对一眼。
+- 身份写错的提交要**重写历史**并 `git push --force-with-lease`，不要用新提交「盖」过去：GitHub 按邮箱归因，错邮箱的提交不会记到账号上，贡献图也不计。
+- 重写会改提交号，所以 `docs/CHANGELOG.md` 里引用的旧号必须同一次改掉，否则记录指向不存在的提交。
+
+理由：2026-11-14 那次改动里 agent 用 `-c` 把身份临时写成 `Hanka <hanka@users.noreply.github.com>`，4 个已推送的提交在 GitHub 上成了陌生作者（那个 noreply 地址也不是账号的有效形式），最后只能重写历史修回来 —— 写错一秒，修回来要强推。
